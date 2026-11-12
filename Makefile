@@ -8,10 +8,16 @@ LDFLAGS := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT)
 
 export CGO_ENABLED ?= 0
 
-.PHONY: build web go deps dev test test-go test-web lint generate fmt clean
+PREFIX  ?= $(HOME)/.local
+
+.PHONY: build web go install deps dev test test-go test-web lint generate fmt clean
 
 ## build: 构建前端并编译单二进制到 $(BIN)
 build: web go
+
+## install: 构建并安装到 $(PREFIX)/bin（默认 ~/.local/bin）；以 systemd 用户服务运行时之后要 systemctl --user restart easel
+install: build
+	install -Dm755 $(BIN) $(PREFIX)/bin/easel
 
 ## web: 构建管理面板到 web/dist（随后被 go:embed 嵌入）
 web: web/node_modules

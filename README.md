@@ -18,6 +18,19 @@ make build          # 构建管理面板并编译 bin/easel
 
 easel 不内置 TLS，只监听本机端口，对外由 Caddy 等反向代理提供。
 
+### 作为 systemd 用户服务运行（Linux）
+
+```sh
+make install                                   # 装到 ~/.local/bin/easel
+install -Dm644 deploy/systemd/easel.service ~/.config/systemd/user/easel.service
+systemctl --user daemon-reload
+systemctl --user enable --now easel
+loginctl enable-linger "$USER"                 # 不登录也常驻
+journalctl --user -u easel -f                  # 看日志
+```
+
+升级：`make install && systemctl --user restart easel`。要改监听地址或公开地址时用 `systemctl --user edit easel` 写 drop-in 覆盖 `ExecStart`。
+
 ## 推送
 
 ```sh

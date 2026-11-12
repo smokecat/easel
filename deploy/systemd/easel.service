@@ -1,0 +1,30 @@
+# easel 的 systemd 用户服务（systemctl --user）。
+#
+# 安装：
+#   make install                               # 二进制装到 ~/.local/bin/easel
+#   install -Dm644 deploy/systemd/easel.service ~/.config/systemd/user/easel.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now easel
+#   loginctl enable-linger "$USER"             # 不登录也常驻（只需一次）
+#
+# 数据在 ~/.local/share/easel，本机 socket 在 $XDG_RUNTIME_DIR/easel/easel.sock，
+# 同一用户的 `easel push` 不需要任何配置。部署到公网时在 ExecStart 后加 --app-url / --content-url，
+# 改动用 `systemctl --user edit easel` 写 drop-in，不要直接改这个文件。
+# 日志：journalctl --user -u easel -f
+
+[Unit]
+Description=easel prototype preview server
+Documentation=https://github.com/smokecat/easel
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/easel serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=yes
+UMask=0027
+
+[Install]
+WantedBy=default.target
