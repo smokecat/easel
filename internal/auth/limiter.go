@@ -27,21 +27,19 @@ func newLimiter(window time.Duration, free int, base, max time.Duration) *limite
 	return &limiter{window: window, free: free, base: base, max: max, entries: map[string]*limitEntry{}}
 }
 
-// wait 返回 key 还要锁定多久；0 表示可以尝试。
-func (l *limiter) wait(key string, now time.Time) time.Duration {
+// begin 开始一次尝试：锁定中时返回还要等多久（不计数）；否则先把这次当作失败记下再返回 0，
+// 验证成功后调 reset。先计数再验证，并发请求就不能都赶在第一次失败入账前溜过去。
+func (l *limiter) begin(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	e, ok := l.entries[key]
-	if !ok || !now.Before(e.lockedUntil) {
-		return 0
+	if e, ok := l.entries[key]; ok && now.Before(e.lockedUntil) {
+		return e.lockedUntil.Sub(now)
 	}
-	return e.lockedUntil.Sub(now)
+	l.failLocked(key, now)
+	return 0
 }
 
-// fail 记一次失败。
-func (l *limiter) fail(key string, now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (l *limiter) failLocked(key string, now time.Time) {
 	e, ok := l.entries[key]
 	if !ok || now.Sub(e.lastFail) > l.window {
 		if len(l.entries) > 4096 {

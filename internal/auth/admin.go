@@ -124,10 +124,6 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	next := safeReturn(r.PostForm.Get("next"))
 	form := loginForm(next)
 	now := s.now()
-	if wait := s.loginLimit.wait("admin", now); wait > 0 {
-		tooManyAttempts(w, wait, form)
-		return
-	}
 	admin, err := s.Store.Q.GetAdmin(r.Context())
 	if noRows(err) {
 		s.loginPage(w, r)
@@ -138,12 +134,15 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		renderPage(w, http.StatusInternalServerError, page{Title: "Sign in", Error: "Internal error."})
 		return
 	}
+	if wait := s.loginLimit.begin("admin", now); wait > 0 {
+		tooManyAttempts(w, wait, form)
+		return
+	}
 	ok, err := verifyPassword(admin.PasswordHash, r.PostForm.Get("password"))
 	if err != nil {
 		s.Log.Error("verify admin password", "err", err)
 	}
 	if !ok {
-		s.loginLimit.fail("admin", now)
 		s.Log.Warn("admin login failed")
 		form.Error = "Wrong password."
 		renderPage(w, http.StatusUnauthorized, form)

@@ -175,15 +175,15 @@ func (s *Service) openShare(w http.ResponseWriter, r *http.Request, label, token
 			renderPage(w, http.StatusForbidden, form)
 			return
 		}
-		key := "share:" + sh.TokenHash
-		if wait := s.shareLimit.wait(key, now); wait > 0 {
-			tooManyAttempts(w, wait, form)
-			return
-		}
 		r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 		if err := r.ParseForm(); err != nil {
 			form.Error = "Invalid form."
 			renderPage(w, http.StatusBadRequest, form)
+			return
+		}
+		key := "share:" + sh.TokenHash
+		if wait := s.shareLimit.begin(key, now); wait > 0 {
+			tooManyAttempts(w, wait, form)
 			return
 		}
 		ok, err := verifyPassword(sh.PasswordHash, r.PostForm.Get("password"))
@@ -191,7 +191,6 @@ func (s *Service) openShare(w http.ResponseWriter, r *http.Request, label, token
 			s.Log.Error("verify share password", "share", sh.ID, "err", err)
 		}
 		if !ok {
-			s.shareLimit.fail(key, now)
 			s.Log.Warn("share password failed", "share", sh.ID)
 			form.Error = "Wrong password."
 			renderPage(w, http.StatusUnauthorized, form)

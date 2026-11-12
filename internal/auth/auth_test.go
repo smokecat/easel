@@ -4,6 +4,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -53,35 +55,55 @@ func TestSafeReturn(t *testing.T) {
 func TestLimiter(t *testing.T) {
 	l := newLimiter(10*time.Minute, 3, time.Second, 4*time.Second)
 	now := time.Unix(1000, 0)
-	for range 2 {
-		l.fail("k", now)
+	for i := range 3 {
+		if w := l.begin("k", now); w != 0 {
+			t.Fatalf("attempt %d locked too early: %v", i, w)
+		}
 	}
-	if w := l.wait("k", now); w != 0 {
-		t.Fatalf("locked too early: %v", w)
-	}
-	l.fail("k", now)
-	if w := l.wait("k", now); w != time.Second {
+	if w := l.begin("k", now); w != time.Second {
 		t.Fatalf("first lock = %v", w)
 	}
-	for range 5 {
-		l.fail("k", now)
+	// 每次锁定结束后再失败，锁定时长翻倍，封顶 4 秒
+	for _, want := range []time.Duration{2 * time.Second, 4 * time.Second, 4 * time.Second} {
+		now = now.Add(5 * time.Second)
+		if w := l.begin("k", now); w != 0 {
+			t.Fatalf("attempt after lock = %v", w)
+		}
+		if w := l.begin("k", now); w != want {
+			t.Fatalf("lock = %v, want %v", w, want)
+		}
 	}
-	if w := l.wait("k", now); w != 4*time.Second {
-		t.Fatalf("capped lock = %v", w)
-	}
-	if w := l.wait("other", now); w != 0 {
+	if w := l.begin("other", now); w != 0 {
 		t.Fatal("keys not independent")
 	}
 	l.reset("k")
-	if w := l.wait("k", now); w != 0 {
+	if w := l.begin("k", now); w != 0 {
 		t.Fatal("reset did not clear")
 	}
 	// 窗口过后重新计数
-	l.fail("k", now)
-	l.fail("k", now)
-	l.fail("k", now.Add(11*time.Minute))
-	if w := l.wait("k", now.Add(11*time.Minute)); w != 0 {
+	l.begin("k", now)
+	later := now.Add(11 * time.Minute)
+	l.begin("k", later)
+	if w := l.begin("k", later); w != 0 {
 		t.Fatalf("window not reset: %v", w)
+	}
+}
+
+func TestLimiterConcurrent(t *testing.T) {
+	l := newLimiter(10*time.Minute, 3, time.Minute, time.Hour)
+	now := time.Unix(1000, 0)
+	var wg sync.WaitGroup
+	var allowed atomic.Int32
+	for range 50 {
+		wg.Go(func() {
+			if l.begin("k", now) == 0 {
+				allowed.Add(1)
+			}
+		})
+	}
+	wg.Wait()
+	if n := allowed.Load(); n != 3 {
+		t.Fatalf("%d concurrent attempts allowed, want 3", n)
 	}
 }
 
