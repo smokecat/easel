@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: web/package.json
+
+      - name: Install dependencies
+        run: make deps
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Smoke test
+        run: |
+          ./bin/easel version
+          ./bin/easel serve --addr 127.0.0.1:7780 &
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:7780/healthz && break; sleep 0.5; done
+          curl -fsS http://127.0.0.1:7780/ | grep -q '<title>easel</title>'
+
+      - name: Working tree is clean
+        run: git diff --exit-code && test -z "$(git status --porcelain)"

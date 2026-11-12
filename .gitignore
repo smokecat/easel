@@ -1,0 +1,8 @@
+/bin/
+/dist/
+*.test
+*.out
+
+# 前端（web/.gitignore 里另有细则）
+web/node_modules/
+
