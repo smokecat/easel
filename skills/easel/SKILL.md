@@ -32,6 +32,20 @@ easel push <目录或文件> --json
 - `stats.skipped`：被默认规则排除的文件（点文件、`node_modules/`、密钥文件）。如果用户确实需要其中某个文件，加 `--include <模式>`。
 - 失败时 `ok` 为 false，看 `error.code`、`error.message`、`error.hint`。
 
+## 暴露正在运行的 dev server
+
+用户要预览一个正在跑的 dev server（Vite、Next 等，需要热更新）而不是构建产物时：
+
+```sh
+easel expose <端口> --json            # urls.preview 就是预览链接；原型名默认是「仓库名-dev」
+easel expose <端口> --name <slug> --json
+```
+
+- 只能暴露 easel 服务端所在机器上的端口。`reachable` 为 false 表示端口上还没有程序在监听，注册仍然成功，提醒用户启动 dev server。
+- dev server 要监听回环地址（`vite --host 127.0.0.1`、`next dev -H 127.0.0.1`），不要让它监听所有网卡。
+- 用的是 webpack-dev-server 时，告诉用户 HMR 需要在 `devServer` 里加 `client: { webSocketURL: 'auto://0.0.0.0:0/ws' }`。
+- 退出码 5：`kind_conflict`（同名原型是推送的静态原型）或 `port_conflict`（端口已挂在别的原型上），换 `--name` 或告诉用户。
+
 ## 分享给别人
 
 用户要「发给别人看」「给个能分享的链接」时：

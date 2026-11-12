@@ -23,6 +23,16 @@ type Prototype struct {
 	// Versions 是版本总数。
 	Versions   int64
 	PreviewURL string
+	// Upstream 只对端口代理原型有值。
+	Upstream *UpstreamSummary
+}
+
+// UpstreamSummary 是端口代理的状态。
+type UpstreamSummary struct {
+	Port         int
+	HostMode     string
+	PausedReason string    // 空表示分享正常
+	LastSeenAt   time.Time // 零值表示从没检测到可达
 }
 
 // VersionSummary 是一个版本的概要。
@@ -49,6 +59,13 @@ func (s *Service) List(ctx context.Context) ([]Prototype, error) {
 			Name: p.Name, Label: p.Label, Title: p.Title, ServeKind: p.ServeKind,
 			CreatedAt: time.UnixMilli(p.CreatedAt), UpdatedAt: time.UnixMilli(p.UpdatedAt),
 			Versions: r.VersionCount, PreviewURL: s.Hosts.ContentOrigin(p.Label) + "/",
+		}
+		if r.UpPort.Valid {
+			u := &UpstreamSummary{Port: int(r.UpPort.Int64), HostMode: r.UpHostMode.String, PausedReason: r.UpPausedReason.String}
+			if r.UpLastSeenAt.Valid {
+				u.LastSeenAt = time.UnixMilli(r.UpLastSeenAt.Int64)
+			}
+			out[i].Upstream = u
 		}
 		if r.RevNumber.Valid {
 			out[i].Current = &VersionSummary{

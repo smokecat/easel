@@ -1,10 +1,12 @@
 // Package server 负责 HTTP 装配：按主机把请求分流到后台或内容子域，并挂中间件。
 //
-// 后台主机：管理面板、健康检查、/api/。内容主机（<label>.<内容域>）：只有 internal/content。
+// 后台主机：管理面板、健康检查、/api/。内容主机（<label>.<内容域>）：先过 auth.Gate，再按原型类型
+// 交给 internal/content（静态版本）或 internal/proxy（端口代理）。
 // 两边不共用任何 cookie 逻辑；落在内容域里却不是一级标签的主机直接 404，不会落到后台。
 package server
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"net/http"
@@ -15,6 +17,7 @@ import (
 	"github.com/smokecat/easel/internal/auth"
 	"github.com/smokecat/easel/internal/config"
 	"github.com/smokecat/easel/internal/content"
+	"github.com/smokecat/easel/internal/proxy"
 )
 
 // Options 是装配服务端所需的依赖。Auth 为空时只有健康检查和不设防的管理面板（只给测试用）；
@@ -26,6 +29,9 @@ type Options struct {
 	Auth    *auth.Service
 	API     *api.API
 	Content *content.Handler
+	// Proxy、Upstreams 为空时不提供端口代理。
+	Proxy     *proxy.Handler
+	Upstreams *proxy.Registry
 }
 
 // New 返回 TCP 监听器用的根 handler，按 Host 分流。
@@ -44,7 +50,7 @@ func New(opts Options) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if label, ok := opts.Hosts.Label(r.Host); ok {
 			opts.Auth.Gate(label, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				opts.Content.ServeHTTP(w, r, label)
+				serveContentHost(w, r, opts, label)
 			})).ServeHTTP(w, r)
 			return
 		}
@@ -54,6 +60,26 @@ func New(opts Options) http.Handler {
 		}
 		app.ServeHTTP(w, r)
 	})
+}
+
+// serveContentHost 在鉴权通过后按原型类型分流：端口代理交给 proxy，其余交给 content。
+func serveContentHost(w http.ResponseWriter, r *http.Request, opts Options, label string) {
+	if opts.Proxy != nil {
+		up, err := opts.Upstreams.Lookup(r.Context(), label)
+		if err != nil {
+			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+			return
+		}
+		if up != nil {
+			allowed := auth.StillAllowed(r.Context())
+			still := func(ctx context.Context) bool {
+				return (allowed == nil || allowed(ctx)) && opts.Upstreams.StillServing(ctx, *up)
+			}
+			opts.Proxy.ServeHTTP(w, r, label, *up, still)
+			return
+		}
+	}
+	opts.Content.ServeHTTP(w, r, label)
 }
 
 // NewSocket 返回本机 unix socket 用的 handler：只有后台路由，请求标记为本机管理员。
@@ -102,6 +128,15 @@ func tlsAsk(opts Options) http.Handler {
 			if ok, err = opts.Content.Exists(r.Context(), label); err != nil {
 				http.Error(w, "lookup failed", http.StatusInternalServerError)
 				return
+			}
+			if !ok && opts.Upstreams != nil {
+				// 端口代理原型没有版本，Content.Exists 不认
+				up, err := opts.Upstreams.Lookup(r.Context(), label)
+				if err != nil {
+					http.Error(w, "lookup failed", http.StatusInternalServerError)
+					return
+				}
+				ok = up != nil
 			}
 		}
 		if !ok {

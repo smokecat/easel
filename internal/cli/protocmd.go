@@ -35,6 +35,12 @@ func runList(ctx context.Context, env *Env, args []string) error {
 		fmt.Fprintln(tw, "NAME\tKIND\tVERSION\tUPDATED\tURL")
 		for _, p := range ps {
 			kind, version := p.ServeKind, "-"
+			if p.Proxy != nil {
+				version = fmt.Sprintf(":%d", p.Proxy.Port)
+				if p.Proxy.Status != "active" {
+					version += " (paused: " + p.Proxy.PausedReason + ")"
+				}
+			}
 			if p.Current != nil {
 				if p.ServeKind == "static" {
 					kind = p.Current.Kind

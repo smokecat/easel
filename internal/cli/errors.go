@@ -41,7 +41,7 @@ func classify(err error) failure {
 			f.exit = ExitAuth
 		case ae.Body.Code == publish.CodeNotFound:
 			f.exit = ExitNotFound
-		case ae.Body.Code == publish.CodeNameConflict:
+		case ae.Body.Code == publish.CodeNameConflict || ae.Body.Code == publish.CodeKindConflict || ae.Body.Code == publish.CodePortConflict:
 			f.exit = ExitConflict
 		case ae.Body.Code == publish.CodeTooLarge:
 			f.exit = ExitRejected

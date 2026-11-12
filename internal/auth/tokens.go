@@ -36,7 +36,7 @@ func ParseScopes(s string) ([]Scope, error) {
 		}
 		sc := Scope(part)
 		if !slices.Contains(AllScopes, sc) {
-			return nil, fmt.Errorf("unknown scope %q (valid: read, write, share)", part)
+			return nil, fmt.Errorf("unknown scope %q (valid: read, write, share, proxy)", part)
 		}
 		if !slices.Contains(out, sc) {
 			out = append(out, sc)

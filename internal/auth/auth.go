@@ -85,10 +85,13 @@ const (
 	ScopeRead  Scope = "read"
 	ScopeWrite Scope = "write"
 	ScopeShare Scope = "share"
+	// ScopeProxy 允许把服务器本机回环端口注册成端口代理（等于能让服务器上的本机服务对外可见），
+	// 新建 token 默认不带。
+	ScopeProxy Scope = "proxy"
 )
 
 // AllScopes 是可以授予 token 的全部 scope。
-var AllScopes = []Scope{ScopeRead, ScopeWrite, ScopeShare}
+var AllScopes = []Scope{ScopeRead, ScopeWrite, ScopeShare, ScopeProxy}
 
 // Kind 是身份类别。
 type Kind string

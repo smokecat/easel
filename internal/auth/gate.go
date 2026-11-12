@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"database/sql"
 	"net/http"
 	"net/url"
@@ -37,48 +38,98 @@ func (s *Service) Gate(label string, next http.Handler) http.Handler {
 			s.serveReserved(w, r, label)
 			return
 		}
-		ok, err := s.viewAllowed(r, label)
+		var value string
+		if c, err := r.Cookie(cookieName(viewCookie, s.contentSecure())); err == nil {
+			value = c.Value
+		}
+		st, err := s.checkView(r.Context(), value, label)
 		if err != nil {
 			s.Log.Error("view session lookup", "label", label, "err", err)
 			http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
 			return
 		}
-		if !ok {
+		switch st {
+		case viewDenied:
 			s.denyContent(w, r, label)
+			return
+		case viewPaused:
+			pausedPage(w)
 			return
 		}
 		stripCookie(r, cookieName(viewCookie, s.contentSecure()))
-		next.ServeHTTP(w, r)
+		// 长连接（端口代理的 WebSocket、SSE）期间定期重新校验，撤销、登出、暂停后断开
+		still := func(ctx context.Context) bool {
+			st, err := s.checkView(ctx, value, label)
+			return err == nil && st == viewOK
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), stillKey{}, still)))
 	})
 }
 
-func (s *Service) viewAllowed(r *http.Request, label string) (bool, error) {
-	c, err := r.Cookie(cookieName(viewCookie, s.contentSecure()))
-	if err != nil || c.Value == "" {
-		return false, nil
+type stillKey struct{}
+
+// StillAllowed 返回 Gate 放进请求 context 的校验函数：调用时重新检查这个访问会话是否仍然有效。
+// 不经 Gate 的请求返回 nil。
+func StillAllowed(ctx context.Context) func(context.Context) bool {
+	f, _ := ctx.Value(stillKey{}).(func(context.Context) bool)
+	return f
+}
+
+type viewState int
+
+const (
+	viewDenied viewState = iota
+	viewOK
+	viewPaused // 分享访客，但这个端口代理原型的分享已暂停
+)
+
+// checkView 校验内容主机上的访问 cookie 值。
+func (s *Service) checkView(ctx context.Context, value, label string) (viewState, error) {
+	if value == "" {
+		return viewDenied, nil
 	}
 	now := s.now()
-	vs, err := s.Store.Q.GetViewSession(r.Context(), db.GetViewSessionParams{
-		IDHash: hashToken(c.Value), HostLabel: label, ExpiresAt: now.UnixMilli(),
+	vs, err := s.Store.Q.GetViewSession(ctx, db.GetViewSessionParams{
+		IDHash: hashToken(value), HostLabel: label, ExpiresAt: now.UnixMilli(),
 	})
 	if noRows(err) {
-		return false, nil
+		return viewDenied, nil
 	}
 	if err != nil {
-		return false, err
+		return viewDenied, err
 	}
 	if !vs.ShareID.Valid {
-		return true, nil // 管理员的访问会话随后台会话删除（外键级联），过期已由查询条件排除
+		return viewOK, nil // 管理员的访问会话随后台会话删除（外键级联），过期已由查询条件排除
 	}
 	// 分享的状态每个请求都查：撤销、过期立即生效
-	sh, err := s.Store.Q.GetShare(r.Context(), vs.ShareID.Int64)
+	sh, err := s.Store.Q.GetShare(ctx, vs.ShareID.Int64)
+	if noRows(err) {
+		return viewDenied, nil
+	}
+	if err != nil {
+		return viewDenied, err
+	}
+	if !shareActive(sh, now) {
+		return viewDenied, nil
+	}
+	if paused, err := s.sharesPaused(ctx, sh.PrototypeID); err != nil || paused {
+		return viewPaused, err
+	}
+	return viewOK, nil
+}
+
+// sharesPaused 报告原型的分享是否因端口代理换了进程或长期不可达而暂停。管理员不受影响。
+func (s *Service) sharesPaused(ctx context.Context, prototypeID int64) (bool, error) {
+	up, err := s.Store.Q.GetUpstream(ctx, prototypeID)
 	if noRows(err) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return shareActive(sh, now), nil
+	return err == nil && up.PausedReason != "", err
+}
+
+func pausedPage(w http.ResponseWriter) {
+	renderPage(w, http.StatusServiceUnavailable, page{Title: "Preview paused",
+		Message: "Sharing for this preview is paused because the program behind it has changed or stopped. Ask the person who shared it to check."})
 }
 
 // denyContent 处理没有访问权的请求：页面导航送去后台换票，其余请求直接 401。
@@ -160,6 +211,14 @@ func (s *Service) openShare(w http.ResponseWriter, r *http.Request, label, token
 	if !valid {
 		renderPage(w, http.StatusNotFound, page{Title: "Link unavailable",
 			Message: "This share link is invalid, has expired, or has been revoked. Ask the person who shared it for a new link."})
+		return
+	}
+	if paused, err := s.sharesPaused(r.Context(), sh.PrototypeID); err != nil {
+		s.Log.Error("upstream lookup", "err", err)
+		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+		return
+	} else if paused {
+		pausedPage(w)
 		return
 	}
 

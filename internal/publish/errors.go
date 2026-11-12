@@ -11,6 +11,8 @@ const (
 	CodeInvalidRequest = "invalid_request"
 	CodeInvalidName    = "invalid_name"
 	CodeNameConflict   = "name_conflict"
+	CodeKindConflict   = "kind_conflict" // 静态原型和端口代理不能互相覆盖
+	CodePortConflict   = "port_conflict" // 端口已经挂在别的原型上
 	CodeNotFound       = "not_found"
 	CodeTooLarge       = "too_large"
 	CodeMissingBlobs   = "missing_blobs"

@@ -17,6 +17,7 @@ import (
 	"github.com/smokecat/easel/internal/blob"
 	"github.com/smokecat/easel/internal/config"
 	"github.com/smokecat/easel/internal/content"
+	"github.com/smokecat/easel/internal/proxy"
 	"github.com/smokecat/easel/internal/publish"
 	"github.com/smokecat/easel/internal/server"
 	"github.com/smokecat/easel/internal/store"
@@ -35,12 +36,13 @@ type serveConfig struct {
 
 // instance 是装配好的服务端。
 type instance struct {
-	store  *store.Store
-	auth   *auth.Service
-	pub    *publish.Service
-	tcp    http.Handler
-	socket http.Handler
-	hosts  config.Hosts
+	store     *store.Store
+	auth      *auth.Service
+	pub       *publish.Service
+	upstreams *proxy.Registry
+	tcp       http.Handler
+	socket    http.Handler
+	hosts     config.Hosts
 }
 
 func (i *instance) Close() error { return i.store.Close() }
@@ -69,14 +71,36 @@ func openInstance(ctx context.Context, c serveConfig) (*instance, error) {
 	}
 	authn := auth.New(st, hosts, key, c.Log)
 	pub := &publish.Service{Store: st, Blobs: blobs, Hosts: hosts, Limits: publish.DefaultLimits, PreviewRequiresLogin: true}
+	upstreams := &proxy.Registry{Store: st}
 	opts := server.Options{
-		Assets:  c.Assets,
-		Hosts:   hosts,
-		Auth:    authn,
-		API:     &api.API{Publish: pub, Auth: authn, Log: c.Log, TempDir: filepath.Join(c.DataDir, "blobs", "tmp")},
-		Content: &content.Handler{Store: st, Blobs: blobs, Hosts: hosts, Log: c.Log},
+		Assets:    c.Assets,
+		Hosts:     hosts,
+		Auth:      authn,
+		API:       &api.API{Publish: pub, Auth: authn, Log: c.Log, TempDir: filepath.Join(c.DataDir, "blobs", "tmp")},
+		Content:   &content.Handler{Store: st, Blobs: blobs, Hosts: hosts, Log: c.Log},
+		Proxy:     proxy.New(hosts, c.Log),
+		Upstreams: upstreams,
 	}
-	return &instance{store: st, auth: authn, pub: pub, tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
+	return &instance{store: st, auth: authn, pub: pub, upstreams: upstreams,
+		tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
+}
+
+// upstreamLoop 每分钟检查一次端口代理的上游：记录可达时间，进程换了或长期不可达时暂停分享。
+func (i *instance) upstreamLoop(ctx context.Context, log *slog.Logger) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		if n, err := i.upstreams.Check(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("check upstreams", "err", err)
+		} else if n > 0 {
+			log.Warn("paused sharing for port proxies", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 // sweepLoop 每小时清理一次过期的会话和票据，并回收不再被引用的 blob（删除原型、推送失败留下的）。
@@ -154,6 +178,7 @@ func runServe(ctx context.Context, env *Env, args []string) error {
 		log.Warn("no admin password set: web sign-in is disabled until you run `easel admin passwd` on this machine")
 	}
 	go inst.sweepLoop(ctx, log)
+	go inst.upstreamLoop(ctx, log)
 
 	errc := make(chan error, len(servers))
 	for i, srv := range servers {

@@ -9,6 +9,40 @@ INSERT INTO prototype (name, label, source_fingerprint, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
+-- name: CreateProxyPrototype :one
+INSERT INTO prototype (name, label, serve_kind, source_fingerprint, created_at, updated_at)
+VALUES (?, ?, 'proxy', ?, ?, ?)
+RETURNING *;
+
+-- name: TouchPrototype :exec
+UPDATE prototype SET updated_at = ? WHERE id = ?;
+
+-- name: UpsertUpstream :exec
+INSERT INTO upstream (prototype_id, port, host_mode, process_exe, process_cwd, registered_at, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (prototype_id) DO UPDATE SET
+    port = excluded.port, host_mode = excluded.host_mode,
+    process_exe = excluded.process_exe, process_cwd = excluded.process_cwd,
+    registered_at = excluded.registered_at, last_seen_at = excluded.last_seen_at,
+    paused_reason = '', paused_at = NULL;
+
+-- name: GetUpstream :one
+SELECT * FROM upstream WHERE prototype_id = ?;
+
+-- name: GetUpstreamByPort :one
+SELECT upstream.*, prototype.name AS prototype_name
+FROM upstream JOIN prototype ON prototype.id = upstream.prototype_id
+WHERE upstream.port = ?;
+
+-- name: ListUpstreams :many
+SELECT * FROM upstream ORDER BY prototype_id;
+
+-- name: SetUpstreamSeen :exec
+UPDATE upstream SET last_seen_at = ? WHERE prototype_id = ?;
+
+-- name: PauseUpstream :exec
+UPDATE upstream SET paused_reason = ?, paused_at = ? WHERE prototype_id = ? AND paused_reason = '';
+
 -- name: SetCurrentRevision :exec
 UPDATE prototype SET current_revision_id = ?, updated_at = ? WHERE id = ?;
 
@@ -139,8 +173,12 @@ DELETE FROM view_session WHERE expires_at <= ?;
 SELECT sqlc.embed(prototype),
        revision.number AS rev_number, revision.kind AS rev_kind, revision.note AS rev_note,
        revision.file_count AS rev_files, revision.total_bytes AS rev_bytes, revision.created_at AS rev_created_at,
-       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count
-FROM prototype LEFT JOIN revision ON revision.id = prototype.current_revision_id
+       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count,
+       upstream.port AS up_port, upstream.host_mode AS up_host_mode, upstream.last_seen_at AS up_last_seen_at,
+       upstream.paused_reason AS up_paused_reason
+FROM prototype
+LEFT JOIN revision ON revision.id = prototype.current_revision_id
+LEFT JOIN upstream ON upstream.prototype_id = prototype.id
 ORDER BY prototype.updated_at DESC, prototype.id DESC;
 
 -- name: CountRevisions :one

@@ -152,6 +152,43 @@ func (q *Queries) CreatePrototype(ctx context.Context, arg CreatePrototypeParams
 	return i, err
 }
 
+const createProxyPrototype = `-- name: CreateProxyPrototype :one
+INSERT INTO prototype (name, label, serve_kind, source_fingerprint, created_at, updated_at)
+VALUES (?, ?, 'proxy', ?, ?, ?)
+RETURNING id, name, label, title, serve_kind, source_fingerprint, current_revision_id, created_at, updated_at
+`
+
+type CreateProxyPrototypeParams struct {
+	Name              string
+	Label             string
+	SourceFingerprint string
+	CreatedAt         int64
+	UpdatedAt         int64
+}
+
+func (q *Queries) CreateProxyPrototype(ctx context.Context, arg CreateProxyPrototypeParams) (Prototype, error) {
+	row := q.db.QueryRowContext(ctx, createProxyPrototype,
+		arg.Name,
+		arg.Label,
+		arg.SourceFingerprint,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i Prototype
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Label,
+		&i.Title,
+		&i.ServeKind,
+		&i.SourceFingerprint,
+		&i.CurrentRevisionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createRevision = `-- name: CreateRevision :one
 INSERT INTO revision (prototype_id, number, origin, kind, entry, spa, note, manifest_hash, file_count, total_bytes, created_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -662,6 +699,64 @@ func (q *Queries) GetUpload(ctx context.Context, arg GetUploadParams) (Upload, e
 	return i, err
 }
 
+const getUpstream = `-- name: GetUpstream :one
+SELECT prototype_id, port, host_mode, process_exe, process_cwd, registered_at, last_seen_at, paused_reason, paused_at FROM upstream WHERE prototype_id = ?
+`
+
+func (q *Queries) GetUpstream(ctx context.Context, prototypeID int64) (Upstream, error) {
+	row := q.db.QueryRowContext(ctx, getUpstream, prototypeID)
+	var i Upstream
+	err := row.Scan(
+		&i.PrototypeID,
+		&i.Port,
+		&i.HostMode,
+		&i.ProcessExe,
+		&i.ProcessCwd,
+		&i.RegisteredAt,
+		&i.LastSeenAt,
+		&i.PausedReason,
+		&i.PausedAt,
+	)
+	return i, err
+}
+
+const getUpstreamByPort = `-- name: GetUpstreamByPort :one
+SELECT upstream.prototype_id, upstream.port, upstream.host_mode, upstream.process_exe, upstream.process_cwd, upstream.registered_at, upstream.last_seen_at, upstream.paused_reason, upstream.paused_at, prototype.name AS prototype_name
+FROM upstream JOIN prototype ON prototype.id = upstream.prototype_id
+WHERE upstream.port = ?
+`
+
+type GetUpstreamByPortRow struct {
+	PrototypeID   int64
+	Port          int64
+	HostMode      string
+	ProcessExe    string
+	ProcessCwd    string
+	RegisteredAt  int64
+	LastSeenAt    sql.NullInt64
+	PausedReason  string
+	PausedAt      sql.NullInt64
+	PrototypeName string
+}
+
+func (q *Queries) GetUpstreamByPort(ctx context.Context, port int64) (GetUpstreamByPortRow, error) {
+	row := q.db.QueryRowContext(ctx, getUpstreamByPort, port)
+	var i GetUpstreamByPortRow
+	err := row.Scan(
+		&i.PrototypeID,
+		&i.Port,
+		&i.HostMode,
+		&i.ProcessExe,
+		&i.ProcessCwd,
+		&i.RegisteredAt,
+		&i.LastSeenAt,
+		&i.PausedReason,
+		&i.PausedAt,
+		&i.PrototypeName,
+	)
+	return i, err
+}
+
 const getViewSession = `-- name: GetViewSession :one
 SELECT id_hash, host_label, session_hash, share_id, created_at, expires_at FROM view_session WHERE id_hash = ? AND host_label = ? AND expires_at > ?
 `
@@ -760,20 +855,28 @@ const listPrototypes = `-- name: ListPrototypes :many
 SELECT prototype.id, prototype.name, prototype.label, prototype.title, prototype.serve_kind, prototype.source_fingerprint, prototype.current_revision_id, prototype.created_at, prototype.updated_at,
        revision.number AS rev_number, revision.kind AS rev_kind, revision.note AS rev_note,
        revision.file_count AS rev_files, revision.total_bytes AS rev_bytes, revision.created_at AS rev_created_at,
-       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count
-FROM prototype LEFT JOIN revision ON revision.id = prototype.current_revision_id
+       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count,
+       upstream.port AS up_port, upstream.host_mode AS up_host_mode, upstream.last_seen_at AS up_last_seen_at,
+       upstream.paused_reason AS up_paused_reason
+FROM prototype
+LEFT JOIN revision ON revision.id = prototype.current_revision_id
+LEFT JOIN upstream ON upstream.prototype_id = prototype.id
 ORDER BY prototype.updated_at DESC, prototype.id DESC
 `
 
 type ListPrototypesRow struct {
-	Prototype    Prototype
-	RevNumber    sql.NullInt64
-	RevKind      sql.NullString
-	RevNote      sql.NullString
-	RevFiles     sql.NullInt64
-	RevBytes     sql.NullInt64
-	RevCreatedAt sql.NullInt64
-	VersionCount int64
+	Prototype      Prototype
+	RevNumber      sql.NullInt64
+	RevKind        sql.NullString
+	RevNote        sql.NullString
+	RevFiles       sql.NullInt64
+	RevBytes       sql.NullInt64
+	RevCreatedAt   sql.NullInt64
+	VersionCount   int64
+	UpPort         sql.NullInt64
+	UpHostMode     sql.NullString
+	UpLastSeenAt   sql.NullInt64
+	UpPausedReason sql.NullString
 }
 
 func (q *Queries) ListPrototypes(ctx context.Context) ([]ListPrototypesRow, error) {
@@ -802,6 +905,10 @@ func (q *Queries) ListPrototypes(ctx context.Context) ([]ListPrototypesRow, erro
 			&i.RevBytes,
 			&i.RevCreatedAt,
 			&i.VersionCount,
+			&i.UpPort,
+			&i.UpHostMode,
+			&i.UpLastSeenAt,
+			&i.UpPausedReason,
 		); err != nil {
 			return nil, err
 		}
@@ -864,6 +971,43 @@ func (q *Queries) ListShares(ctx context.Context, prototypeID interface{}) ([]Li
 	return items, nil
 }
 
+const listUpstreams = `-- name: ListUpstreams :many
+SELECT prototype_id, port, host_mode, process_exe, process_cwd, registered_at, last_seen_at, paused_reason, paused_at FROM upstream ORDER BY prototype_id
+`
+
+func (q *Queries) ListUpstreams(ctx context.Context) ([]Upstream, error) {
+	rows, err := q.db.QueryContext(ctx, listUpstreams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Upstream{}
+	for rows.Next() {
+		var i Upstream
+		if err := rows.Scan(
+			&i.PrototypeID,
+			&i.Port,
+			&i.HostMode,
+			&i.ProcessExe,
+			&i.ProcessCwd,
+			&i.RegisteredAt,
+			&i.LastSeenAt,
+			&i.PausedReason,
+			&i.PausedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextRevisionNumber = `-- name: NextRevisionNumber :one
 SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM revision WHERE prototype_id = ?
 `
@@ -873,6 +1017,21 @@ func (q *Queries) NextRevisionNumber(ctx context.Context, prototypeID int64) (in
 	var next int64
 	err := row.Scan(&next)
 	return next, err
+}
+
+const pauseUpstream = `-- name: PauseUpstream :exec
+UPDATE upstream SET paused_reason = ?, paused_at = ? WHERE prototype_id = ? AND paused_reason = ''
+`
+
+type PauseUpstreamParams struct {
+	PausedReason string
+	PausedAt     sql.NullInt64
+	PrototypeID  int64
+}
+
+func (q *Queries) PauseUpstream(ctx context.Context, arg PauseUpstreamParams) error {
+	_, err := q.db.ExecContext(ctx, pauseUpstream, arg.PausedReason, arg.PausedAt, arg.PrototypeID)
+	return err
 }
 
 const revokeAPIToken = `-- name: RevokeAPIToken :execrows
@@ -939,6 +1098,20 @@ func (q *Queries) SetCurrentRevision(ctx context.Context, arg SetCurrentRevision
 	return err
 }
 
+const setUpstreamSeen = `-- name: SetUpstreamSeen :exec
+UPDATE upstream SET last_seen_at = ? WHERE prototype_id = ?
+`
+
+type SetUpstreamSeenParams struct {
+	LastSeenAt  sql.NullInt64
+	PrototypeID int64
+}
+
+func (q *Queries) SetUpstreamSeen(ctx context.Context, arg SetUpstreamSeenParams) error {
+	_, err := q.db.ExecContext(ctx, setUpstreamSeen, arg.LastSeenAt, arg.PrototypeID)
+	return err
+}
+
 const takeTicket = `-- name: TakeTicket :one
 DELETE FROM ticket WHERE id_hash = ? RETURNING id_hash, host_label, session_hash, expires_at
 `
@@ -966,5 +1139,52 @@ type TouchAPITokenParams struct {
 
 func (q *Queries) TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error {
 	_, err := q.db.ExecContext(ctx, touchAPIToken, arg.LastUsedAt, arg.ID)
+	return err
+}
+
+const touchPrototype = `-- name: TouchPrototype :exec
+UPDATE prototype SET updated_at = ? WHERE id = ?
+`
+
+type TouchPrototypeParams struct {
+	UpdatedAt int64
+	ID        int64
+}
+
+func (q *Queries) TouchPrototype(ctx context.Context, arg TouchPrototypeParams) error {
+	_, err := q.db.ExecContext(ctx, touchPrototype, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const upsertUpstream = `-- name: UpsertUpstream :exec
+INSERT INTO upstream (prototype_id, port, host_mode, process_exe, process_cwd, registered_at, last_seen_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (prototype_id) DO UPDATE SET
+    port = excluded.port, host_mode = excluded.host_mode,
+    process_exe = excluded.process_exe, process_cwd = excluded.process_cwd,
+    registered_at = excluded.registered_at, last_seen_at = excluded.last_seen_at,
+    paused_reason = '', paused_at = NULL
+`
+
+type UpsertUpstreamParams struct {
+	PrototypeID  int64
+	Port         int64
+	HostMode     string
+	ProcessExe   string
+	ProcessCwd   string
+	RegisteredAt int64
+	LastSeenAt   sql.NullInt64
+}
+
+func (q *Queries) UpsertUpstream(ctx context.Context, arg UpsertUpstreamParams) error {
+	_, err := q.db.ExecContext(ctx, upsertUpstream,
+		arg.PrototypeID,
+		arg.Port,
+		arg.HostMode,
+		arg.ProcessExe,
+		arg.ProcessCwd,
+		arg.RegisteredAt,
+		arg.LastSeenAt,
+	)
 	return err
 }

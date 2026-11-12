@@ -95,6 +95,18 @@ type Upload struct {
 	ExpiresAt int64
 }
 
+type Upstream struct {
+	PrototypeID  int64
+	Port         int64
+	HostMode     string
+	ProcessExe   string
+	ProcessCwd   string
+	RegisteredAt int64
+	LastSeenAt   sql.NullInt64
+	PausedReason string
+	PausedAt     sql.NullInt64
+}
+
 type ViewSession struct {
 	IDHash      string
 	HostLabel   string

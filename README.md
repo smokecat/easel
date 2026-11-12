@@ -4,7 +4,7 @@
 
 面向单管理员的自托管场景，运行在 Linux / macOS 上。服务端和 CLI 是同一个二进制。
 
-> 状态：早期开发中。已能推送静态目录、按内容主机名预览，预览需要登录或分享链接；端口代理、管理面板还没做。
+> 状态：早期开发中。已能推送静态目录、暴露 dev server 端口，预览需要登录或分享链接；管理面板还没做。
 
 ## 从源码构建
 
@@ -62,7 +62,7 @@ easel share revoke <id>                        # 立即生效，已经打开的�
 ### 在别的机器上用 CLI
 
 ```sh
-# 在服务端机器上创建 token（明文只显示一次；默认权限 read,write，需要管理分享链接时加 share）
+# 在服务端机器上创建 token（明文只显示一次；默认权限 read,write，需要管理分享链接时加 share，注册端口代理加 proxy）
 easel token create --name laptop --scope read,write,share --expires 90d
 
 # 在另一台机器上
@@ -96,6 +96,22 @@ dir = "dist"       # easel push 不带参数时推这个目录
 spa = true         # 未命中的页面路径回退到入口页
 ignore = ["*.map"]
 ```
+
+## 暴露 dev server（端口代理）
+
+```sh
+npm run dev                      # 比如 Vite 在 5173
+easel expose 5173                # stdout 输出预览链接，名字默认是「仓库名-dev」
+easel expose 3000 --name shop    # 指定名字；再运行一次可以换端口
+```
+
+- 只能代理 easel 服务端所在机器的回环端口（`[::1]` 和 `127.0.0.1` 都会试）。注册长期有效，dev server 重启或暂时停掉不用重新注册；没在运行时预览页显示说明。
+- 访问控制和静态原型一样：管理员登录后可看，分享链接给别人看。撤销分享、登出、删除原型后，已经建立的 WebSocket（HMR）在几秒内断开。
+- 默认对 dev server 伪装成 `localhost:<端口>`，Vite、Next.js 不用改配置，HMR 正常。dev server 需要知道公网地址时加 `--preserve-host`（这时要自己在 dev server 里放行这个主机名）。
+- webpack-dev-server：HMR 需要在 `devServer` 里加 `client: { webSocketURL: 'auto://0.0.0.0:0/ws' }`，否则浏览器会直连 dev server 的端口。
+- dev server 请只监听回环地址（`vite --host 127.0.0.1`、`next dev -H 127.0.0.1`）：Next 和 webpack-dev-server 默认监听所有网卡，会绕过 easel 直接暴露。
+- 安全：easel 每分钟检查一次端口。监听这个端口的程序换了（另一个项目占用了它，按可执行文件和工作目录判断，仅 Linux），或者连续 7 天连不上，分享自动暂停（管理员仍可访问）；确认无误后重新 `easel expose` 恢复。
+- 一个端口只能挂一个原型；推送的原型和端口代理不能互相覆盖。用 token 注册需要 `proxy` 权限（新 token 默认不带）。
 
 ## 开发
 

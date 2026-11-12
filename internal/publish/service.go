@@ -17,6 +17,12 @@ import (
 	"github.com/smokecat/easel/internal/store/db"
 )
 
+// 原型的 serve_kind。
+const (
+	ServeStatic = "static"
+	ServeProxy  = "proxy"
+)
+
 // UploadTTL 是三步协议里上传会话的有效期。
 const UploadTTL = time.Hour
 
@@ -71,6 +77,11 @@ func (s *Service) newPlan(name string, req CreateRequest) (*plan, error) {
 
 // checkSource 拒绝「推断出的名字命中一个来源不同的已有原型」。显式给名字时不检查。
 func checkSource(proto db.Prototype, src Source) error {
+	if proto.ServeKind != ServeStatic {
+		return errf(http.StatusConflict, CodeKindConflict,
+			"prototype %q is a port proxy (easel expose); it cannot receive pushed files", proto.Name).
+			withHint("push under another --name, or remove it first with `easel rm " + proto.Name + "`")
+	}
 	if src.Inferred && proto.SourceFingerprint != src.Fingerprint {
 		return errf(http.StatusConflict, CodeNameConflict,
 			"prototype %q already exists and was pushed from a different source", proto.Name).
