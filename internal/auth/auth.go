@@ -247,8 +247,11 @@ func safeMethod(m string) bool {
 
 // sameOrigin 校验浏览器发来的非安全请求是否来自 origin 本身。现代浏览器对 POST 一定带 Origin；
 // 两个头都没有时拒绝（用 cookie 认证的只有浏览器）。
+//
+// 页面的 Referrer-Policy 是 no-referrer 时，浏览器提交表单会发 Origin: null（不是缺省），
+// 这时同样退回看 Sec-Fetch-Site：它由浏览器设置，网页脚本改不了，沙箱 iframe 发来的是 cross-site。
 func sameOrigin(r *http.Request, origin string) bool {
-	if o := r.Header.Get("Origin"); o != "" {
+	if o := r.Header.Get("Origin"); o != "" && o != "null" {
 		return o == origin
 	}
 	return r.Header.Get("Sec-Fetch-Site") == "same-origin"

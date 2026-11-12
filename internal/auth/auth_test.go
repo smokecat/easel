@@ -120,6 +120,38 @@ func TestParseScopes(t *testing.T) {
 	}
 }
 
+func TestSameOrigin(t *testing.T) {
+	const app = "https://easel.example.com"
+	tests := []struct {
+		origin, fetchSite string
+		want              bool
+	}{
+		{app, "", true},
+		{app, "same-origin", true},
+		{"https://evil.example", "same-origin", false}, // Origin 明确不同时不看 Sec-Fetch-Site
+		{"https://evil.example", "", false},
+		// Referrer-Policy: no-referrer 下浏览器提交表单发 Origin: null（2026-11-12 线上登录被拒的原因）
+		{"null", "same-origin", true},
+		{"null", "cross-site", false}, // 沙箱 iframe
+		{"null", "", false},
+		{"", "same-origin", true},
+		{"", "same-site", false},
+		{"", "", false},
+	}
+	for _, tt := range tests {
+		r := httptest.NewRequest("POST", "/auth/login", nil)
+		if tt.origin != "" {
+			r.Header.Set("Origin", tt.origin)
+		}
+		if tt.fetchSite != "" {
+			r.Header.Set("Sec-Fetch-Site", tt.fetchSite)
+		}
+		if got := sameOrigin(r, app); got != tt.want {
+			t.Errorf("Origin %q, Sec-Fetch-Site %q: got %v, want %v", tt.origin, tt.fetchSite, got, tt.want)
+		}
+	}
+}
+
 func TestStripCookie(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.Header.Set("Cookie", "a=1; easel_view=secret; b=2")

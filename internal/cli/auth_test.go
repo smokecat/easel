@@ -96,6 +96,15 @@ func TestAdminSignInFlow(t *testing.T) {
 		"Content-Type", "application/x-www-form-urlencoded", "Origin", "https://evil.example"); rec.Code != http.StatusForbidden {
 		t.Errorf("cross-site login = %d, want 403", rec.Code)
 	}
+	// 登录页不能是 no-referrer（否则浏览器发 Origin: null）；万一是 null，靠 Sec-Fetch-Site 放行
+	if rp := b.get(app + "/auth/login").Header().Get("Referrer-Policy"); rp != "same-origin" {
+		t.Errorf("login page Referrer-Policy = %q", rp)
+	}
+	nb := newBrowser(t, s.inst.tcp)
+	if rec := nb.do("POST", app+"/auth/login", strings.NewReader("next=%2F&password="+url.QueryEscape(testAdminPassword)),
+		"Content-Type", "application/x-www-form-urlencoded", "Origin", "null", "Sec-Fetch-Site", "same-origin"); rec.Code != http.StatusSeeOther {
+		t.Errorf("login with Origin: null + Sec-Fetch-Site: same-origin = %d %s", rec.Code, rec.Body.String())
+	}
 	if rec := b.login(app, "wrong password"); rec.Code != http.StatusUnauthorized {
 		t.Errorf("wrong password = %d, want 401", rec.Code)
 	}

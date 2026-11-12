@@ -57,7 +57,9 @@ func renderPage(w http.ResponseWriter, status int, p page) {
 	hdr := w.Header()
 	hdr.Set("Content-Type", "text/html; charset=utf-8")
 	hdr.Set("Cache-Control", "no-store")
-	hdr.Set("Referrer-Policy", "no-referrer")
+	// 不能用 no-referrer：那样浏览器提交表单时 Origin 是 null，同源校验就只能靠 Sec-Fetch-Site。
+	// same-origin 只在同源请求里带 Referer；分享密码页提交后的 303 自己带 no-referrer，令牌不会流进原型
+	hdr.Set("Referrer-Policy", "same-origin")
 	hdr.Set("X-Content-Type-Options", "nosniff")
 	hdr.Set("X-Frame-Options", "DENY")
 	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
