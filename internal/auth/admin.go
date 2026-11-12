@@ -86,8 +86,9 @@ func isAdmin(r *http.Request) bool {
 	return id != nil && id.Kind == KindAdmin
 }
 
-func loginForm(next string) page {
-	return page{Title: "Sign in", Form: true, Action: LoginPath, Submit: "Sign in", Hidden: map[string]string{"next": next}}
+func (s *Service) loginForm(next string) page {
+	return page{Title: "Sign in", Form: true, Action: LoginPath, Submit: "Sign in", Hidden: map[string]string{"next": next},
+		FormRedirects: s.Hosts.Content.Scheme + "://*." + s.Hosts.Content.Host}
 }
 
 func (s *Service) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +108,7 @@ func (s *Service) loginPage(w http.ResponseWriter, r *http.Request) {
 			Message: "No admin password has been set. On the server, run: easel admin passwd"})
 		return
 	}
-	renderPage(w, http.StatusOK, loginForm(next))
+	renderPage(w, http.StatusOK, s.loginForm(next))
 }
 
 func (s *Service) login(w http.ResponseWriter, r *http.Request) {
@@ -122,7 +123,7 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	next := safeReturn(r.PostForm.Get("next"))
-	form := loginForm(next)
+	form := s.loginForm(next)
 	now := s.now()
 	admin, err := s.Store.Q.GetAdmin(r.Context())
 	if noRows(err) {

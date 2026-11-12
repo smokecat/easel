@@ -51,6 +51,9 @@ type page struct {
 	Form                  bool
 	Action, Submit        string
 	Hidden                map[string]string
+	// FormRedirects 是表单提交后重定向链可能到达的其他源，追加到 CSP 的 form-action。
+	// Chrome 对 form-action 连重定向的每一跳都检查：登录成功后会经 /auth/authorize 跳到内容主机换票。
+	FormRedirects string
 }
 
 func renderPage(w http.ResponseWriter, status int, p page) {
@@ -62,7 +65,11 @@ func renderPage(w http.ResponseWriter, status int, p page) {
 	hdr.Set("Referrer-Policy", "same-origin")
 	hdr.Set("X-Content-Type-Options", "nosniff")
 	hdr.Set("X-Frame-Options", "DENY")
-	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'")
+	formAction := "'self'"
+	if p.FormRedirects != "" {
+		formAction += " " + p.FormRedirects
+	}
+	hdr.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action "+formAction+"; frame-ancestors 'none'; base-uri 'none'")
 	w.WriteHeader(status)
 	_ = pageTmpl.Execute(w, p)
 }

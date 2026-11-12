@@ -97,8 +97,13 @@ func TestAdminSignInFlow(t *testing.T) {
 		t.Errorf("cross-site login = %d, want 403", rec.Code)
 	}
 	// 登录页不能是 no-referrer（否则浏览器发 Origin: null）；万一是 null，靠 Sec-Fetch-Site 放行
-	if rp := b.get(app + "/auth/login").Header().Get("Referrer-Policy"); rp != "same-origin" {
+	loginPage := b.get(app + "/auth/login")
+	if rp := loginPage.Header().Get("Referrer-Policy"); rp != "same-origin" {
 		t.Errorf("login page Referrer-Policy = %q", rp)
+	}
+	// Chrome 对 form-action 检查整条重定向链：登录成功后会跳到内容主机换票
+	if csp := loginPage.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "form-action 'self' http://*.localhost:7780;") {
+		t.Errorf("login page CSP = %q", csp)
 	}
 	nb := newBrowser(t, s.inst.tcp)
 	if rec := nb.do("POST", app+"/auth/login", strings.NewReader("next=%2F&password="+url.QueryEscape(testAdminPassword)),
