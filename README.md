@@ -4,7 +4,7 @@
 
 面向单管理员的自托管场景，运行在 Linux / macOS 上。服务端和 CLI 是同一个二进制。
 
-> 状态：早期开发中。已能推送静态目录并按内容主机名预览；登录、分享链接、端口代理还没做。
+> 状态：早期开发中。已能推送静态目录、按内容主机名预览，预览需要登录或分享链接；端口代理、管理面板还没做。
 
 ## 从源码构建
 
@@ -35,11 +35,49 @@ journalctl --user -u easel -f                  # 看日志
 
 后台和原型内容必须在不同主机上：后台用 `easel.example.com`，原型用 `*.easel.example.com`（两条 DNS 记录），启动参数 `--app-url https://easel.example.com --content-url https://easel.example.com`。Caddy 配置见 [`deploy/caddy/Caddyfile.example`](deploy/caddy/Caddyfile.example)：证书按需签发，easel 的 `/_tls/ask` 只放行后台主机和已存在的原型。
 
+> 后台和内容同在一个注册域下（如上例）时，原型和后台「同站」：原型脚本能往父域种 cookie。easel 自己的 cookie 都是 host-only 的 `__Host-` cookie，后台会话不会被原型读到，但这种部署形态只适合内容基本可信的场景（自己或自己的 agent 产出的原型）。要放不可信的内容，给内容另用一个注册域。
+
+## 登录与访问控制
+
+```sh
+easel admin passwd            # 在服务端所在的机器上设置管理员密码（经 unix socket）
+```
+
+- 预览链接需要访问权：没有时浏览器会被送到后台登录，登录后自动回到原页面。每个原型主机各自换一张只对它有效的访问 cookie，后台的会话 cookie 不会发给内容主机。
+- 后台会话 30 天有效；改密码会注销所有会话。登录失败过多会临时锁定（全局计数），此时仍可以在服务端机器上用 CLI。
+- 服务端第一次启动时在数据目录生成 `secret.key`，用来派生分享链接。换掉或丢失它，所有分享链接都会失效；备份数据目录时一起备份。
+
+### 分享链接
+
+```sh
+easel share create myapp                       # stdout 输出分享链接
+easel share create myapp --expires 7d --note "给 Bob"
+easel share create myapp --password            # 终端里提示输入访客密码；非交互用 --password-stdin
+easel share list [myapp]                       # 链接随时可以再复制；--all 包括已过期、已撤销的
+easel share revoke <id>                        # 立即生效，已经打开的访客下一个请求就会失效
+```
+
+分享链接授予原型的主地址（跟随最新版本）。访客打开链接后换成本主机的访问 cookie（24 小时，且不超过分享的有效期），地址栏里不再带令牌。密码错误按链接计数限速。
+
+### 在别的机器上用 CLI
+
+```sh
+# 在服务端机器上创建 token（明文只显示一次；默认权限 read,write，需要管理分享链接时加 share）
+easel token create --name laptop --scope read,write,share --expires 90d
+
+# 在另一台机器上
+easel login --server https://easel.example.com   # 粘贴 token；非交互用 --token-stdin
+easel push ./dist
+```
+
+- 连接的选择顺序：`--server` / `EASEL_SERVER`（token 取 `EASEL_TOKEN` 或已保存的凭据）> 本机 unix socket > `easel login` 保存的服务端。凭据存在 `~/.config/easel/credentials.toml`（0600）。
+- `easel token list`、`easel token revoke <id>` 只能在服务端机器上（或用后台会话）执行，token 不能管理 token。`easel logout` 只删除本地凭据，不撤销 token。
+
 ## 推送
 
 ```sh
 easel serve &                 # 同机的 CLI 经 unix socket 连接，免登录
-easel push ./dist             # stdout 输出预览链接，如 http://myapp-k3x9qa.localhost:7780/
+easel push ./dist             # stdout 输出预览链接，如 http://myapp-k3x9qa.localhost:7780/（打开需要登录）
 easel push ./dist --json      # 结构化结果，字段只增不改
 ```
 
@@ -57,8 +95,6 @@ dir = "dist"       # easel push 不带参数时推这个目录
 spa = true         # 未命中的页面路径回退到入口页
 ignore = ["*.map"]
 ```
-
-> 注意：访问控制还没实现，目前写 API 只开放在本机 unix socket 上，但**预览链接不需要登录**，能访问内容主机的人都能打开。在实现登录和分享链接之前，不要把内容域暴露到公网。
 
 ## 开发
 

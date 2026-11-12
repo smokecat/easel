@@ -17,24 +17,35 @@ import (
 	"github.com/smokecat/easel/internal/content"
 )
 
-// Options 是装配服务端所需的依赖。API、Content 为空时对应的路由不挂（测试用）。
+// Options 是装配服务端所需的依赖。Auth 为空时只有健康检查和不设防的管理面板（只给测试用）；
+// API、Content 需要 Auth。
 type Options struct {
 	// Assets 是管理面板的静态文件，根目录下应有 index.html。
 	Assets  fs.FS
 	Hosts   config.Hosts
+	Auth    *auth.Service
 	API     *api.API
 	Content *content.Handler
 }
 
 // New 返回 TCP 监听器用的根 handler，按 Host 分流。
+// 后台主机上的请求经 auth.Identify 认出身份；内容主机上的请求先过 auth.Gate。
 func New(opts Options) http.Handler {
-	app := appMux(opts)
+	if (opts.API != nil || opts.Content != nil) && opts.Auth == nil {
+		panic("server: API and Content require Auth")
+	}
+	var app http.Handler = appMux(opts)
+	if opts.Auth != nil {
+		app = opts.Auth.Identify(app)
+	}
 	if opts.Content == nil {
 		return app
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if label, ok := opts.Hosts.Label(r.Host); ok {
-			opts.Content.ServeHTTP(w, r, label)
+			opts.Auth.Gate(label, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				opts.Content.ServeHTTP(w, r, label)
+			})).ServeHTTP(w, r)
 			return
 		}
 		if opts.Hosts.IsContentDomain(r.Host) {
@@ -45,7 +56,7 @@ func New(opts Options) http.Handler {
 	})
 }
 
-// NewSocket 返回本机 unix socket 用的 handler：只有后台路由，请求标记为本机受信。
+// NewSocket 返回本机 unix socket 用的 handler：只有后台路由，请求标记为本机管理员。
 func NewSocket(opts Options) http.Handler {
 	return auth.TrustLocal(appMux(opts))
 }
@@ -56,13 +67,18 @@ func appMux(opts Options) *http.ServeMux {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	var requireLogin func(http.ResponseWriter, *http.Request) bool
+	if opts.Auth != nil {
+		opts.Auth.RegisterApp(mux)
+		requireLogin = opts.Auth.RequireAdminPage
+	}
 	if opts.API != nil {
 		opts.API.Register(mux)
 	}
 	if opts.Content != nil {
 		mux.Handle("GET "+TLSAskPath, tlsAsk(opts))
 	}
-	mux.Handle("/", spaHandler(opts.Assets))
+	mux.Handle("/", spaHandler(opts.Assets, requireLogin))
 	return mux
 }
 
@@ -97,7 +113,8 @@ func tlsAsk(opts Options) http.Handler {
 }
 
 // spaHandler 提供管理面板：存在的文件直接返回，其余路径回退到 index.html，交给前端路由。
-func spaHandler(assets fs.FS) http.Handler {
+// 静态资源公开（不含数据）；页面本身要求登录（requireLogin 为空时不要求，只给测试用）。
+func spaHandler(assets fs.FS, requireLogin func(http.ResponseWriter, *http.Request) bool) http.Handler {
 	files := http.FileServerFS(assets)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -115,6 +132,9 @@ func spaHandler(assets fs.FS) http.Handler {
 				files.ServeHTTP(w, r)
 				return
 			}
+		}
+		if requireLogin != nil && !requireLogin(w, r) {
+			return
 		}
 		index, err := fs.ReadFile(assets, "index.html")
 		if err != nil {

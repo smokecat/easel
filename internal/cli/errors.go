@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/smokecat/easel/internal/client"
 	"github.com/smokecat/easel/internal/publish"
@@ -21,12 +22,18 @@ func classify(err error) failure {
 	var ue *usageError
 	var ce *client.ConnError
 	var ae *client.APIError
+	var auErr *authError
 	switch {
 	case errors.As(err, &ue):
 		return failure{exit: ExitUsage, Code: "usage", Message: ue.msg, Hint: ue.hint}
+	case errors.As(err, &auErr):
+		return failure{exit: ExitAuth, Code: "unauthorized", Message: auErr.msg, Hint: auErr.hint}
 	case errors.As(err, &ce):
-		return failure{exit: ExitUnreachable, Code: "unreachable", Message: ce.Error(), Retryable: true,
-			Hint: "start the server with `easel serve` on this machine, or point --socket / EASEL_SOCKET at its socket"}
+		hint := "start the server with `easel serve` on this machine, or point --socket / EASEL_SOCKET at its socket"
+		if strings.Contains(ce.Target, "://") {
+			hint = "check the server URL and your network; the saved server comes from `easel login`"
+		}
+		return failure{exit: ExitUnreachable, Code: "unreachable", Message: ce.Error(), Retryable: true, Hint: hint}
 	case errors.As(err, &ae):
 		f := failure{exit: ExitError, Code: ae.Body.Code, Message: ae.Body.Message, Hint: ae.Body.Hint}
 		switch {

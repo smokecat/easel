@@ -28,6 +28,8 @@ const (
 
 // Env 是子命令运行所需的外部依赖，由 cmd/easel 装配。
 type Env struct {
+	// Stdin 用来读 --password-stdin / --token-stdin；是终端（*os.File）时可以无回显提示。
+	Stdin          io.Reader
 	Stdout, Stderr io.Writer
 	// WebAssets 是嵌入的管理面板文件。
 	WebAssets fs.FS
@@ -41,6 +43,11 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"push", "推送目录或文件，返回预览链接", runPush},
+		{"share", "创建、列出、撤销分享链接", runShare},
+		{"login", "登录远端服务端（保存地址和 API token）", runLogin},
+		{"logout", "删除保存的凭据", runLogout},
+		{"token", "管理 API token", runToken},
+		{"admin", "管理员设置（passwd）", runAdmin},
 		{"serve", "启动 easel 服务端", runServe},
 		{"version", "显示版本信息", runVersion},
 	}

@@ -15,6 +15,7 @@ const (
 	CodeTooLarge       = "too_large"
 	CodeMissingBlobs   = "missing_blobs"
 	CodeUnauthorized   = "unauthorized"
+	CodeForbidden      = "forbidden"
 	CodeInternal       = "internal"
 )
 

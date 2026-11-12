@@ -1,4 +1,4 @@
-// Package client 是 CLI 调服务端用的 HTTP 客户端。目前只支持本机 unix socket（免登录）；远端 token 登录后续加。
+// Package client 是 CLI 调服务端用的 HTTP 客户端：本机 unix socket（免登录）或远端 TCP + API token。
 package client
 
 import (
@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/smokecat/easel/internal/publish"
@@ -19,10 +20,13 @@ import (
 
 // Client 调 easel 的 HTTP API。
 type Client struct {
-	http *http.Client
-	base string
-	// Socket 是连接的 unix socket 路径，用于报错。
-	Socket string
+	http  *http.Client
+	base  string
+	token string
+	// Target 是连接目标（unix socket 路径或服务端地址），用于报错。
+	Target string
+	// Remote 为 true 表示经 TCP 连接远端服务端（带 token），否则是本机 unix socket。
+	Remote bool
 }
 
 // ConnError 表示连不上服务端（socket 不存在、拒绝连接、超时）。
@@ -53,7 +57,16 @@ func NewSocket(path string) *Client {
 		},
 		ResponseHeaderTimeout: 5 * time.Minute, // 大文件写盘和提交可能要一会儿
 	}
-	return &Client{http: &http.Client{Transport: tr}, base: "http://easel", Socket: path}
+	return &Client{http: &http.Client{Transport: tr}, base: "http://easel", Target: path}
+}
+
+// NewRemote 返回经 TCP 连接远端服务端的客户端，请求带 Authorization: Bearer <token>。
+// server 是后台地址（如 https://easel.example.com）；不跟随重定向，免得把 token 发到别处。
+func NewRemote(server, token string) *Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = 5 * time.Minute
+	hc := &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &Client{http: hc, base: strings.TrimSuffix(server, "/"), token: token, Target: server, Remote: true}
 }
 
 func (c *Client) do(ctx context.Context, method, path string, hdr http.Header, body io.Reader, out any) error {
@@ -64,12 +77,16 @@ func (c *Client) do(ctx context.Context, method, path string, hdr http.Header, b
 	for k, v := range hdr {
 		req.Header[k] = v
 	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		var ne net.Error
 		var oe *net.OpError
-		if errors.As(err, &oe) || errors.As(err, &ne) || errors.Is(err, os.ErrNotExist) {
-			return &ConnError{Target: c.Socket, Err: err}
+		var de *net.DNSError
+		if errors.As(err, &oe) || errors.As(err, &ne) || errors.As(err, &de) || errors.Is(err, os.ErrNotExist) {
+			return &ConnError{Target: c.Target, Err: err}
 		}
 		return err
 	}
@@ -78,14 +95,18 @@ func (c *Client) do(ctx context.Context, method, path string, hdr http.Header, b
 	if err != nil {
 		return err
 	}
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		var eb publish.ErrorBody
 		if json.Unmarshal(data, &eb) == nil && eb.Error != nil {
 			return &APIError{Status: resp.StatusCode, Body: *eb.Error}
 		}
-		return &APIError{Status: resp.StatusCode, Body: publish.Error{Code: "http_error", Message: fmt.Sprintf("server returned %s", resp.Status)}}
+		msg := fmt.Sprintf("server returned %s", resp.Status)
+		if loc := resp.Header.Get("Location"); loc != "" {
+			msg += " (redirect to " + loc + "; check the server URL)"
+		}
+		return &APIError{Status: resp.StatusCode, Body: publish.Error{Code: "http_error", Message: msg}}
 	}
-	if out != nil {
+	if out != nil && len(data) > 0 {
 		if err := json.Unmarshal(data, out); err != nil {
 			return fmt.Errorf("decode response: %w", err)
 		}

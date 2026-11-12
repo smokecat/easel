@@ -26,8 +26,10 @@ var migrations embed.FS
 type Store struct {
 	write *sql.DB
 	read  *sql.DB
-	// Q 是只读查询；写操作用 Tx。
+	// Q 是只读查询；写操作用 W（单条语句）或 Tx（多条语句）。
 	Q *db.Queries
+	// W 走唯一的写连接，单条写语句用它，免得在读连接池上写库撞 SQLITE_BUSY。
+	W *db.Queries
 }
 
 // Open 打开（必要时创建）数据库文件并执行迁移。
@@ -50,7 +52,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 	read.SetMaxOpenConns(4)
 
-	s := &Store{write: write, read: read, Q: db.New(read)}
+	s := &Store{write: write, read: read, Q: db.New(read), W: db.New(write)}
 	if err := s.migrate(ctx); err != nil {
 		_ = s.Close()
 		return nil, err

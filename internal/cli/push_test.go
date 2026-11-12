@@ -26,6 +26,8 @@ type testServer struct {
 	t      *testing.T
 	inst   *instance
 	socket string
+
+	adminBrowser *browser
 }
 
 func newTestServer(t *testing.T) *testServer {
@@ -35,9 +37,15 @@ func newTestServer(t *testing.T) *testServer {
 
 func newTestServerWith(t *testing.T, appURL, contentURL string) *testServer {
 	t.Helper()
+	dir := t.TempDir()
+	// 隔离本机环境：本机可能真有一个 easel serve 在默认 socket 上，凭据文件也不能碰真的
 	t.Setenv("EASEL_NAME", "")
 	t.Setenv("EASEL_SOCKET", "")
-	dir := t.TempDir()
+	t.Setenv("EASEL_SERVER", "")
+	t.Setenv("EASEL_TOKEN", "")
+	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(dir, "run"))
+	t.Setenv("XDG_DATA_HOME", filepath.Join(dir, "xdg-data"))
+	t.Setenv("EASEL_CREDENTIALS", filepath.Join(dir, "credentials.toml"))
 	inst, err := openInstance(context.Background(), serveConfig{
 		DataDir: filepath.Join(dir, "data"), AppURL: appURL, ContentURL: contentURL,
 		Assets: fstest.MapFS{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -68,15 +76,19 @@ func (s *testServer) push(args ...string) (int, map[string]any, string) {
 	return code, res, errb.String()
 }
 
-// get 以内容主机的 Host 发请求。
+// get 以管理员身份（已登录的浏览器）发请求，不跟随重定向。内容主机还没有访问 cookie 时，
+// 先走一遍「跳后台换票」再重发原请求。
 func (s *testServer) get(rawURL string, hdr ...string) *httptest.ResponseRecorder {
 	s.t.Helper()
-	req := httptest.NewRequest("GET", rawURL, nil)
-	for i := 0; i+1 < len(hdr); i += 2 {
-		req.Header.Set(hdr[i], hdr[i+1])
+	b := s.admin()
+	rec := b.get(rawURL, hdr...)
+	if loc := rec.Header().Get("Location"); rec.Code == http.StatusFound && strings.Contains(loc, "/auth/authorize?") {
+		last := b.follow(loc)
+		if last.Code != http.StatusFound {
+			return last // 比如原型不存在：后台的 404 页
+		}
+		rec = b.get(rawURL, hdr...)
 	}
-	rec := httptest.NewRecorder()
-	s.inst.tcp.ServeHTTP(rec, req)
 	return rec
 }
 

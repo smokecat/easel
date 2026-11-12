@@ -8,6 +8,24 @@ import (
 	"database/sql"
 )
 
+type Admin struct {
+	ID           int64
+	PasswordHash string
+	UpdatedAt    int64
+}
+
+type ApiToken struct {
+	ID         int64
+	Name       string
+	TokenHash  string
+	Hint       string
+	Scopes     string
+	CreatedAt  int64
+	ExpiresAt  sql.NullInt64
+	LastUsedAt sql.NullInt64
+	RevokedAt  sql.NullInt64
+}
+
 type Artifact struct {
 	RevisionID  int64
 	Path        string
@@ -43,10 +61,45 @@ type Revision struct {
 	CreatedAt    int64
 }
 
+type Session struct {
+	IDHash    string
+	CreatedAt int64
+	ExpiresAt int64
+	UserAgent string
+}
+
+type Share struct {
+	ID           int64
+	PrototypeID  int64
+	Nonce        string
+	TokenHash    string
+	Note         string
+	PasswordHash string
+	CreatedAt    int64
+	ExpiresAt    sql.NullInt64
+	RevokedAt    sql.NullInt64
+}
+
+type Ticket struct {
+	IDHash      string
+	HostLabel   string
+	SessionHash string
+	ExpiresAt   int64
+}
+
 type Upload struct {
 	ID        string
 	Name      string
 	Request   string
 	CreatedAt int64
 	ExpiresAt int64
+}
+
+type ViewSession struct {
+	IDHash      string
+	HostLabel   string
+	SessionHash sql.NullString
+	ShareID     sql.NullInt64
+	CreatedAt   int64
+	ExpiresAt   int64
 }

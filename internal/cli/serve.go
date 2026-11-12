@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/smokecat/easel/internal/api"
+	"github.com/smokecat/easel/internal/auth"
 	"github.com/smokecat/easel/internal/blob"
 	"github.com/smokecat/easel/internal/config"
 	"github.com/smokecat/easel/internal/content"
@@ -35,6 +36,7 @@ type serveConfig struct {
 // instance 是装配好的服务端。
 type instance struct {
 	store  *store.Store
+	auth   *auth.Service
 	tcp    http.Handler
 	socket http.Handler
 	hosts  config.Hosts
@@ -59,14 +61,37 @@ func openInstance(ctx context.Context, c serveConfig) (*instance, error) {
 		_ = st.Close()
 		return nil, err
 	}
-	pub := &publish.Service{Store: st, Blobs: blobs, Hosts: hosts, Limits: publish.DefaultLimits}
+	key, err := auth.LoadOrCreateKey(filepath.Join(c.DataDir, "secret.key"))
+	if err != nil {
+		_ = st.Close()
+		return nil, fmt.Errorf("server key: %w", err)
+	}
+	authn := auth.New(st, hosts, key, c.Log)
+	pub := &publish.Service{Store: st, Blobs: blobs, Hosts: hosts, Limits: publish.DefaultLimits, PreviewRequiresLogin: true}
 	opts := server.Options{
 		Assets:  c.Assets,
 		Hosts:   hosts,
-		API:     &api.API{Publish: pub, Log: c.Log, TempDir: filepath.Join(c.DataDir, "blobs", "tmp")},
+		Auth:    authn,
+		API:     &api.API{Publish: pub, Auth: authn, Log: c.Log, TempDir: filepath.Join(c.DataDir, "blobs", "tmp")},
 		Content: &content.Handler{Store: st, Blobs: blobs, Hosts: hosts, Log: c.Log},
 	}
-	return &instance{store: st, tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
+	return &instance{store: st, auth: authn, tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
+}
+
+// sweepLoop 每小时清理一次过期的会话和票据。
+func (i *instance) sweepLoop(ctx context.Context, log *slog.Logger) {
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		if err := i.auth.Sweep(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("sweep expired sessions", "err", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
 }
 
 func runServe(ctx context.Context, env *Env, args []string) error {
@@ -117,7 +142,12 @@ func runServe(ctx context.Context, env *Env, args []string) error {
 	log.Info("easel listening", "addr", "http://"+ln.Addr().String(), "socket", *socket,
 		"app", inst.hosts.AppOrigin(), "content", "*."+inst.hosts.Content.Host, "data", *dataDir,
 		"version", versionInfo().Version)
-	log.Warn("preview links are not access-controlled yet: anyone who can reach the content host and knows a prototype's host name can view it")
+	if ok, err := inst.auth.HasAdminPassword(ctx); err != nil {
+		return err
+	} else if !ok {
+		log.Warn("no admin password set: web sign-in is disabled until you run `easel admin passwd` on this machine")
+	}
+	go inst.sweepLoop(ctx, log)
 
 	errc := make(chan error, len(servers))
 	for i, srv := range servers {

@@ -3,6 +3,7 @@ package api
 
 import (
 	"compress/gzip"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,33 +21,53 @@ const maxManifestBytes = 16 << 20
 // API 持有各处理器的依赖。
 type API struct {
 	Publish *publish.Service
+	Auth    *auth.Service
 	Log     *slog.Logger
 	TempDir string
 }
 
-// Register 把 API 路由挂到 mux 上（路径都以 /api/v1/ 开头）。
+// Register 把 API 路由挂到 mux 上（路径都以 /api/v1/ 开头）。外层必须套 auth.Identify 或 auth.TrustLocal。
 func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/prototypes/{name}/versions", a.need(auth.ScopeWrite, a.createVersion))
 	mux.Handle("PUT /api/v1/uploads/{id}/blobs", a.need(auth.ScopeWrite, a.putBlobs))
 	mux.Handle("POST /api/v1/uploads/{id}/commit", a.need(auth.ScopeWrite, a.commit))
 	mux.Handle("POST /api/v1/push", a.need(auth.ScopeWrite, a.pushArchive))
+
+	mux.Handle("GET /api/v1/whoami", a.guard(authenticated, a.whoami))
+	mux.Handle("PUT /api/v1/admin/password", a.guard(auth.CheckLocal, a.setPassword))
+	mux.Handle("POST /api/v1/tokens", a.guard(auth.CheckAdmin, a.createToken))
+	mux.Handle("GET /api/v1/tokens", a.guard(auth.CheckAdmin, a.listTokens))
+	mux.Handle("DELETE /api/v1/tokens/{id}", a.guard(auth.CheckAdmin, a.revokeToken))
+	mux.Handle("POST /api/v1/prototypes/{name}/shares", a.need(auth.ScopeShare, a.createShare))
+	mux.Handle("GET /api/v1/shares", a.need(auth.ScopeShare, a.listShares))
+	mux.Handle("DELETE /api/v1/shares/{id}", a.need(auth.ScopeShare, a.revokeShare))
+
 	mux.Handle("/api/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, r, &publish.Error{Status: http.StatusNotFound, Code: publish.CodeNotFound, Message: "no such API endpoint"})
 	}))
 }
 
 func (a *API) need(scope auth.Scope, h http.HandlerFunc) http.Handler {
+	return a.guard(func(r *http.Request) error { return auth.Check(r, scope) }, h)
+}
+
+// guard 在 check 通过后才执行 h。
+func (a *API) guard(check func(*http.Request) error, h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !auth.Allowed(r, scope) {
-			a.fail(w, r, &publish.Error{
-				Status: http.StatusUnauthorized, Code: publish.CodeUnauthorized,
-				Message: "this API is only available over the local unix socket for now",
-				Hint:    "run easel on the same machine as `easel serve`; token login is not implemented yet",
-			})
+		if err := check(r); err != nil {
+			a.fail(w, r, err)
 			return
 		}
 		h(w, r)
 	})
+}
+
+// authenticated 只要求有身份（任何 scope）。
+func authenticated(r *http.Request) error {
+	if auth.FromRequest(r) != nil {
+		return nil
+	}
+	return auth.Check(r, auth.ScopeRead) // 复用 Check 给出的未认证原因
 }
 
 func (a *API) createVersion(w http.ResponseWriter, r *http.Request) {
@@ -123,8 +144,24 @@ func decodeBody(r *http.Request) (io.Reader, error) {
 func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 	e := publish.AsError(err)
 	var mbe *http.MaxBytesError
-	if errors.As(err, &mbe) {
+	var denied *auth.Denied
+	switch {
+	case errors.As(err, &mbe):
 		e = &publish.Error{Status: http.StatusRequestEntityTooLarge, Code: publish.CodeTooLarge, Message: "request body too large"}
+	case errors.As(err, &denied):
+		e = &publish.Error{Status: denied.Status, Message: denied.Message, Hint: denied.Hint}
+		switch denied.Status {
+		case http.StatusUnauthorized:
+			e.Code = publish.CodeUnauthorized
+		case http.StatusForbidden:
+			e.Code = publish.CodeForbidden
+		case http.StatusBadRequest:
+			e.Code = publish.CodeInvalidRequest
+		default:
+			e.Code = publish.CodeInternal
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		e = &publish.Error{Status: http.StatusNotFound, Code: publish.CodeNotFound, Message: "not found"}
 	}
 	if e.Code == publish.CodeInternal && a.Log != nil {
 		a.Log.Error("api error", "method", r.Method, "path", r.URL.Path, "err", err)

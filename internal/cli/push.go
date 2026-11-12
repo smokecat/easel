@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/smokecat/easel/internal/client"
 	"github.com/smokecat/easel/internal/config"
 	"github.com/smokecat/easel/internal/publish"
 )
@@ -25,9 +24,10 @@ func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
 type pushOptions struct {
-	name, note, socket string
-	spa, jsonOut, dry  bool
-	include, exclude   stringList
+	name, note        string
+	spa, jsonOut, dry bool
+	include, exclude  stringList
+	conn              *connFlags
 }
 
 func runPush(ctx context.Context, env *Env, args []string) error {
@@ -48,7 +48,7 @@ func runPush(ctx context.Context, env *Env, args []string) error {
 	fset.BoolVar(&o.dry, "dry-run", false, "只列出会上传哪些文件")
 	fset.Var(&o.include, "include", "把默认排除的文件加回来（gitignore 语法，可重复）")
 	fset.Var(&o.exclude, "exclude", "追加排除规则（gitignore 语法，可重复）")
-	fset.StringVar(&o.socket, "socket", config.DefaultSocket(), "服务端的 unix socket（也可用 EASEL_SOCKET）")
+	o.conn = addConnFlags(fset)
 
 	paths, err := parseInterspersed(fset, args)
 	if err != nil {
@@ -178,7 +178,10 @@ func push(ctx context.Context, env *Env, o pushOptions, paths []string) error {
 		entries[i] = f.FileEntry
 	}
 
-	c := client.NewSocket(o.socket)
+	c, err := o.conn.connect()
+	if err != nil {
+		return err
+	}
 	resp, err := c.CreateVersion(ctx, id.Name, publish.CreateRequest{
 		Files: entries, Note: o.note, SPA: spa,
 		Source: publish.Source{Fingerprint: id.Fingerprint, Inferred: id.Inferred},

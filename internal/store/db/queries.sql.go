@@ -21,6 +21,45 @@ func (q *Queries) BlobReferenced(ctx context.Context, blobHash string) (bool, er
 	return referenced, err
 }
 
+const createAPIToken = `-- name: CreateAPIToken :one
+INSERT INTO api_token (name, token_hash, hint, scopes, created_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, name, token_hash, hint, scopes, created_at, expires_at, last_used_at, revoked_at
+`
+
+type CreateAPITokenParams struct {
+	Name      string
+	TokenHash string
+	Hint      string
+	Scopes    string
+	CreatedAt int64
+	ExpiresAt sql.NullInt64
+}
+
+func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) (ApiToken, error) {
+	row := q.db.QueryRowContext(ctx, createAPIToken,
+		arg.Name,
+		arg.TokenHash,
+		arg.Hint,
+		arg.Scopes,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.TokenHash,
+		&i.Hint,
+		&i.Scopes,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const createArtifact = `-- name: CreateArtifact :exec
 INSERT INTO artifact (revision_id, path, blob_hash, size, content_type)
 VALUES (?, ?, ?, ?, ?)
@@ -134,6 +173,89 @@ func (q *Queries) CreateRevision(ctx context.Context, arg CreateRevisionParams) 
 	return i, err
 }
 
+const createSession = `-- name: CreateSession :exec
+INSERT INTO session (id_hash, created_at, expires_at, user_agent) VALUES (?, ?, ?, ?)
+`
+
+type CreateSessionParams struct {
+	IDHash    string
+	CreatedAt int64
+	ExpiresAt int64
+	UserAgent string
+}
+
+func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) error {
+	_, err := q.db.ExecContext(ctx, createSession,
+		arg.IDHash,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+		arg.UserAgent,
+	)
+	return err
+}
+
+const createShare = `-- name: CreateShare :one
+INSERT INTO share (prototype_id, nonce, token_hash, note, password_hash, created_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, prototype_id, nonce, token_hash, note, password_hash, created_at, expires_at, revoked_at
+`
+
+type CreateShareParams struct {
+	PrototypeID  int64
+	Nonce        string
+	TokenHash    string
+	Note         string
+	PasswordHash string
+	CreatedAt    int64
+	ExpiresAt    sql.NullInt64
+}
+
+func (q *Queries) CreateShare(ctx context.Context, arg CreateShareParams) (Share, error) {
+	row := q.db.QueryRowContext(ctx, createShare,
+		arg.PrototypeID,
+		arg.Nonce,
+		arg.TokenHash,
+		arg.Note,
+		arg.PasswordHash,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	var i Share
+	err := row.Scan(
+		&i.ID,
+		&i.PrototypeID,
+		&i.Nonce,
+		&i.TokenHash,
+		&i.Note,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const createTicket = `-- name: CreateTicket :exec
+INSERT INTO ticket (id_hash, host_label, session_hash, expires_at) VALUES (?, ?, ?, ?)
+`
+
+type CreateTicketParams struct {
+	IDHash      string
+	HostLabel   string
+	SessionHash string
+	ExpiresAt   int64
+}
+
+func (q *Queries) CreateTicket(ctx context.Context, arg CreateTicketParams) error {
+	_, err := q.db.ExecContext(ctx, createTicket,
+		arg.IDHash,
+		arg.HostLabel,
+		arg.SessionHash,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const createUpload = `-- name: CreateUpload :exec
 INSERT INTO upload (id, name, request, created_at, expires_at) VALUES (?, ?, ?, ?, ?)
 `
@@ -157,12 +279,92 @@ func (q *Queries) CreateUpload(ctx context.Context, arg CreateUploadParams) erro
 	return err
 }
 
+const createViewSession = `-- name: CreateViewSession :exec
+INSERT INTO view_session (id_hash, host_label, session_hash, share_id, created_at, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)
+`
+
+type CreateViewSessionParams struct {
+	IDHash      string
+	HostLabel   string
+	SessionHash sql.NullString
+	ShareID     sql.NullInt64
+	CreatedAt   int64
+	ExpiresAt   int64
+}
+
+func (q *Queries) CreateViewSession(ctx context.Context, arg CreateViewSessionParams) error {
+	_, err := q.db.ExecContext(ctx, createViewSession,
+		arg.IDHash,
+		arg.HostLabel,
+		arg.SessionHash,
+		arg.ShareID,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const deleteAllSessions = `-- name: DeleteAllSessions :exec
+DELETE FROM session
+`
+
+func (q *Queries) DeleteAllSessions(ctx context.Context) error {
+	_, err := q.db.ExecContext(ctx, deleteAllSessions)
+	return err
+}
+
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+DELETE FROM session WHERE expires_at <= ?
+`
+
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt int64) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredSessions, expiresAt)
+	return err
+}
+
+const deleteExpiredTickets = `-- name: DeleteExpiredTickets :exec
+DELETE FROM ticket WHERE expires_at <= ?
+`
+
+func (q *Queries) DeleteExpiredTickets(ctx context.Context, expiresAt int64) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredTickets, expiresAt)
+	return err
+}
+
 const deleteExpiredUploads = `-- name: DeleteExpiredUploads :exec
 DELETE FROM upload WHERE expires_at <= ?
 `
 
 func (q *Queries) DeleteExpiredUploads(ctx context.Context, expiresAt int64) error {
 	_, err := q.db.ExecContext(ctx, deleteExpiredUploads, expiresAt)
+	return err
+}
+
+const deleteExpiredViewSessions = `-- name: DeleteExpiredViewSessions :exec
+DELETE FROM view_session WHERE expires_at <= ?
+`
+
+func (q *Queries) DeleteExpiredViewSessions(ctx context.Context, expiresAt int64) error {
+	_, err := q.db.ExecContext(ctx, deleteExpiredViewSessions, expiresAt)
+	return err
+}
+
+const deleteSession = `-- name: DeleteSession :exec
+DELETE FROM session WHERE id_hash = ?
+`
+
+func (q *Queries) DeleteSession(ctx context.Context, idHash string) error {
+	_, err := q.db.ExecContext(ctx, deleteSession, idHash)
+	return err
+}
+
+const deleteShareViewSessions = `-- name: DeleteShareViewSessions :exec
+DELETE FROM view_session WHERE share_id = ?
+`
+
+func (q *Queries) DeleteShareViewSessions(ctx context.Context, shareID sql.NullInt64) error {
+	_, err := q.db.ExecContext(ctx, deleteShareViewSessions, shareID)
 	return err
 }
 
@@ -173,6 +375,68 @@ DELETE FROM upload WHERE id = ?
 func (q *Queries) DeleteUpload(ctx context.Context, id string) error {
 	_, err := q.db.ExecContext(ctx, deleteUpload, id)
 	return err
+}
+
+const deleteViewSession = `-- name: DeleteViewSession :exec
+DELETE FROM view_session WHERE id_hash = ?
+`
+
+func (q *Queries) DeleteViewSession(ctx context.Context, idHash string) error {
+	_, err := q.db.ExecContext(ctx, deleteViewSession, idHash)
+	return err
+}
+
+const getAPITokenByHash = `-- name: GetAPITokenByHash :one
+SELECT id, name, token_hash, hint, scopes, created_at, expires_at, last_used_at, revoked_at FROM api_token WHERE token_hash = ?
+`
+
+func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error) {
+	row := q.db.QueryRowContext(ctx, getAPITokenByHash, tokenHash)
+	var i ApiToken
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.TokenHash,
+		&i.Hint,
+		&i.Scopes,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const getAdmin = `-- name: GetAdmin :one
+SELECT id, password_hash, updated_at FROM admin WHERE id = 1
+`
+
+func (q *Queries) GetAdmin(ctx context.Context) (Admin, error) {
+	row := q.db.QueryRowContext(ctx, getAdmin)
+	var i Admin
+	err := row.Scan(&i.ID, &i.PasswordHash, &i.UpdatedAt)
+	return i, err
+}
+
+const getPrototype = `-- name: GetPrototype :one
+SELECT id, name, label, title, serve_kind, source_fingerprint, current_revision_id, created_at, updated_at FROM prototype WHERE id = ?
+`
+
+func (q *Queries) GetPrototype(ctx context.Context, id int64) (Prototype, error) {
+	row := q.db.QueryRowContext(ctx, getPrototype, id)
+	var i Prototype
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Label,
+		&i.Title,
+		&i.ServeKind,
+		&i.SourceFingerprint,
+		&i.CurrentRevisionID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getPrototypeByLabel = `-- name: GetPrototypeByLabel :one
@@ -270,6 +534,69 @@ func (q *Queries) GetRevisionByNumber(ctx context.Context, arg GetRevisionByNumb
 	return i, err
 }
 
+const getSession = `-- name: GetSession :one
+SELECT id_hash, created_at, expires_at, user_agent FROM session WHERE id_hash = ? AND expires_at > ?
+`
+
+type GetSessionParams struct {
+	IDHash    string
+	ExpiresAt int64
+}
+
+func (q *Queries) GetSession(ctx context.Context, arg GetSessionParams) (Session, error) {
+	row := q.db.QueryRowContext(ctx, getSession, arg.IDHash, arg.ExpiresAt)
+	var i Session
+	err := row.Scan(
+		&i.IDHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.UserAgent,
+	)
+	return i, err
+}
+
+const getShare = `-- name: GetShare :one
+SELECT id, prototype_id, nonce, token_hash, note, password_hash, created_at, expires_at, revoked_at FROM share WHERE id = ?
+`
+
+func (q *Queries) GetShare(ctx context.Context, id int64) (Share, error) {
+	row := q.db.QueryRowContext(ctx, getShare, id)
+	var i Share
+	err := row.Scan(
+		&i.ID,
+		&i.PrototypeID,
+		&i.Nonce,
+		&i.TokenHash,
+		&i.Note,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const getShareByTokenHash = `-- name: GetShareByTokenHash :one
+SELECT id, prototype_id, nonce, token_hash, note, password_hash, created_at, expires_at, revoked_at FROM share WHERE token_hash = ?
+`
+
+func (q *Queries) GetShareByTokenHash(ctx context.Context, tokenHash string) (Share, error) {
+	row := q.db.QueryRowContext(ctx, getShareByTokenHash, tokenHash)
+	var i Share
+	err := row.Scan(
+		&i.ID,
+		&i.PrototypeID,
+		&i.Nonce,
+		&i.TokenHash,
+		&i.Note,
+		&i.PasswordHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getUpload = `-- name: GetUpload :one
 SELECT id, name, request, created_at, expires_at FROM upload WHERE id = ? AND expires_at > ?
 `
@@ -290,6 +617,67 @@ func (q *Queries) GetUpload(ctx context.Context, arg GetUploadParams) (Upload, e
 		&i.ExpiresAt,
 	)
 	return i, err
+}
+
+const getViewSession = `-- name: GetViewSession :one
+SELECT id_hash, host_label, session_hash, share_id, created_at, expires_at FROM view_session WHERE id_hash = ? AND host_label = ? AND expires_at > ?
+`
+
+type GetViewSessionParams struct {
+	IDHash    string
+	HostLabel string
+	ExpiresAt int64
+}
+
+func (q *Queries) GetViewSession(ctx context.Context, arg GetViewSessionParams) (ViewSession, error) {
+	row := q.db.QueryRowContext(ctx, getViewSession, arg.IDHash, arg.HostLabel, arg.ExpiresAt)
+	var i ViewSession
+	err := row.Scan(
+		&i.IDHash,
+		&i.HostLabel,
+		&i.SessionHash,
+		&i.ShareID,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const listAPITokens = `-- name: ListAPITokens :many
+SELECT id, name, token_hash, hint, scopes, created_at, expires_at, last_used_at, revoked_at FROM api_token ORDER BY id
+`
+
+func (q *Queries) ListAPITokens(ctx context.Context) ([]ApiToken, error) {
+	rows, err := q.db.QueryContext(ctx, listAPITokens)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ApiToken{}
+	for rows.Next() {
+		var i ApiToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.TokenHash,
+			&i.Hint,
+			&i.Scopes,
+			&i.CreatedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listArtifacts = `-- name: ListArtifacts :many
@@ -325,6 +713,54 @@ func (q *Queries) ListArtifacts(ctx context.Context, revisionID int64) ([]Artifa
 	return items, nil
 }
 
+const listShares = `-- name: ListShares :many
+SELECT share.id, share.prototype_id, share.nonce, share.token_hash, share.note, share.password_hash, share.created_at, share.expires_at, share.revoked_at, prototype.name AS prototype_name, prototype.label AS prototype_label
+FROM share JOIN prototype ON prototype.id = share.prototype_id
+WHERE ?1 IS NULL OR share.prototype_id = ?1
+ORDER BY share.id
+`
+
+type ListSharesRow struct {
+	Share          Share
+	PrototypeName  string
+	PrototypeLabel string
+}
+
+func (q *Queries) ListShares(ctx context.Context, prototypeID interface{}) ([]ListSharesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listShares, prototypeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSharesRow{}
+	for rows.Next() {
+		var i ListSharesRow
+		if err := rows.Scan(
+			&i.Share.ID,
+			&i.Share.PrototypeID,
+			&i.Share.Nonce,
+			&i.Share.TokenHash,
+			&i.Share.Note,
+			&i.Share.PasswordHash,
+			&i.Share.CreatedAt,
+			&i.Share.ExpiresAt,
+			&i.Share.RevokedAt,
+			&i.PrototypeName,
+			&i.PrototypeLabel,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextRevisionNumber = `-- name: NextRevisionNumber :one
 SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM revision WHERE prototype_id = ?
 `
@@ -334,6 +770,55 @@ func (q *Queries) NextRevisionNumber(ctx context.Context, prototypeID int64) (in
 	var next int64
 	err := row.Scan(&next)
 	return next, err
+}
+
+const revokeAPIToken = `-- name: RevokeAPIToken :execrows
+UPDATE api_token SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL
+`
+
+type RevokeAPITokenParams struct {
+	RevokedAt sql.NullInt64
+	ID        int64
+}
+
+func (q *Queries) RevokeAPIToken(ctx context.Context, arg RevokeAPITokenParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeAPIToken, arg.RevokedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const revokeShare = `-- name: RevokeShare :execrows
+UPDATE share SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL
+`
+
+type RevokeShareParams struct {
+	RevokedAt sql.NullInt64
+	ID        int64
+}
+
+func (q *Queries) RevokeShare(ctx context.Context, arg RevokeShareParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, revokeShare, arg.RevokedAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setAdminPassword = `-- name: SetAdminPassword :exec
+INSERT INTO admin (id, password_hash, updated_at) VALUES (1, ?, ?)
+ON CONFLICT (id) DO UPDATE SET password_hash = excluded.password_hash, updated_at = excluded.updated_at
+`
+
+type SetAdminPasswordParams struct {
+	PasswordHash string
+	UpdatedAt    int64
+}
+
+func (q *Queries) SetAdminPassword(ctx context.Context, arg SetAdminPasswordParams) error {
+	_, err := q.db.ExecContext(ctx, setAdminPassword, arg.PasswordHash, arg.UpdatedAt)
+	return err
 }
 
 const setCurrentRevision = `-- name: SetCurrentRevision :exec
@@ -348,5 +833,35 @@ type SetCurrentRevisionParams struct {
 
 func (q *Queries) SetCurrentRevision(ctx context.Context, arg SetCurrentRevisionParams) error {
 	_, err := q.db.ExecContext(ctx, setCurrentRevision, arg.CurrentRevisionID, arg.UpdatedAt, arg.ID)
+	return err
+}
+
+const takeTicket = `-- name: TakeTicket :one
+DELETE FROM ticket WHERE id_hash = ? RETURNING id_hash, host_label, session_hash, expires_at
+`
+
+func (q *Queries) TakeTicket(ctx context.Context, idHash string) (Ticket, error) {
+	row := q.db.QueryRowContext(ctx, takeTicket, idHash)
+	var i Ticket
+	err := row.Scan(
+		&i.IDHash,
+		&i.HostLabel,
+		&i.SessionHash,
+		&i.ExpiresAt,
+	)
+	return i, err
+}
+
+const touchAPIToken = `-- name: TouchAPIToken :exec
+UPDATE api_token SET last_used_at = ? WHERE id = ?
+`
+
+type TouchAPITokenParams struct {
+	LastUsedAt sql.NullInt64
+	ID         int64
+}
+
+func (q *Queries) TouchAPIToken(ctx context.Context, arg TouchAPITokenParams) error {
+	_, err := q.db.ExecContext(ctx, touchAPIToken, arg.LastUsedAt, arg.ID)
 	return err
 }
