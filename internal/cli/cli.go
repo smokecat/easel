@@ -15,9 +15,15 @@ import (
 
 // 退出码。
 const (
-	ExitOK    = 0
-	ExitError = 1 // 运行时错误
-	ExitUsage = 2 // 参数错误
+	ExitOK          = 0
+	ExitError       = 1 // 未分类的运行时错误
+	ExitUsage       = 2 // 参数错误、路径不存在
+	ExitAuth        = 3 // 没有凭据、权限不足
+	ExitNotFound    = 4 // 原型、版本、分享链接不存在
+	ExitConflict    = 5 // 推断的名字撞了别的来源
+	ExitRejected    = 6 // 超过大小或文件数上限
+	ExitUnreachable = 7 // 连不上服务端
+	ExitServer      = 8 // 服务端错误（5xx）
 )
 
 // Env 是子命令运行所需的外部依赖，由 cmd/easel 装配。
@@ -34,13 +40,14 @@ type command struct {
 
 func commands() []command {
 	return []command{
+		{"push", "推送目录或文件，返回预览链接", runPush},
 		{"serve", "启动 easel 服务端", runServe},
 		{"version", "显示版本信息", runVersion},
 	}
 }
 
 // usageError 表示参数错误，对应退出码 ExitUsage。
-type usageError struct{ msg string }
+type usageError struct{ msg, hint string }
 
 func (e *usageError) Error() string { return e.msg }
 
@@ -63,17 +70,15 @@ func Run(ctx context.Context, env *Env, args []string) int {
 			continue
 		}
 		err := c.run(ctx, env, args[1:])
-		var ue *usageError
-		switch {
-		case err == nil, errors.Is(err, flag.ErrHelp):
+		if err == nil || errors.Is(err, flag.ErrHelp) {
 			return ExitOK
-		case errors.As(err, &ue):
-			fmt.Fprintf(env.Stderr, "easel %s: %v\n", name, err)
-			return ExitUsage
-		default:
-			fmt.Fprintf(env.Stderr, "easel %s: %v\n", name, err)
-			return ExitError
 		}
+		f := classify(err)
+		fmt.Fprintf(env.Stderr, "easel %s: %s\n", name, f.Message)
+		if f.Hint != "" {
+			fmt.Fprintf(env.Stderr, "hint: %s\n", f.Hint)
+		}
+		return f.exit
 	}
 	fmt.Fprintf(env.Stderr, "easel: unknown command %q; run `easel help` for usage\n", name)
 	return ExitUsage

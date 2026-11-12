@@ -60,6 +60,7 @@ make go       # 只编译 Go，用现有的 web/dist
 make test     # go test ./... 与 vitest
 make lint     # gofmt 检查、go vet、oxlint、tsc
 make fmt      # gofmt -w
+make generate # 改了 internal/store 的迁移或 queries.sql 后重新生成 sqlc 代码（生成结果要提交）
 ```
 
 - `web/dist/` 只提交 `.gitkeep`，没构建前端时 Go 也能编译测试，`easel serve` 会对首页返回 503 并提示 `make build`。vite build 会清空 dist，Makefile 在构建后补回 `.gitkeep`。

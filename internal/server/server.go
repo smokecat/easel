@@ -1,6 +1,7 @@
 // Package server 负责 HTTP 装配：按主机把请求分流到后台或内容子域，并挂中间件。
 //
-// 目前只有后台主机的一部分：嵌入的管理面板和健康检查。按主机分流在内容服务落地时加入。
+// 后台主机：管理面板、健康检查、/api/。内容主机（<label>.<内容域>）：只有 internal/content。
+// 两边不共用任何 cookie 逻辑；落在内容域里却不是一级标签的主机直接 404，不会落到后台。
 package server
 
 import (
@@ -9,21 +10,55 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/smokecat/easel/internal/api"
+	"github.com/smokecat/easel/internal/auth"
+	"github.com/smokecat/easel/internal/config"
+	"github.com/smokecat/easel/internal/content"
 )
 
-// Options 是装配服务端所需的依赖。
+// Options 是装配服务端所需的依赖。API、Content 为空时对应的路由不挂（测试用）。
 type Options struct {
 	// Assets 是管理面板的静态文件，根目录下应有 index.html。
-	Assets fs.FS
+	Assets  fs.FS
+	Hosts   config.Hosts
+	API     *api.API
+	Content *content.Handler
 }
 
-// New 返回服务端的根 handler。
+// New 返回 TCP 监听器用的根 handler，按 Host 分流。
 func New(opts Options) http.Handler {
+	app := appMux(opts)
+	if opts.Content == nil {
+		return app
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if label, ok := opts.Hosts.Label(r.Host); ok {
+			opts.Content.ServeHTTP(w, r, label)
+			return
+		}
+		if opts.Hosts.IsContentDomain(r.Host) {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+			return
+		}
+		app.ServeHTTP(w, r)
+	})
+}
+
+// NewSocket 返回本机 unix socket 用的 handler：只有后台路由，请求标记为本机受信。
+func NewSocket(opts Options) http.Handler {
+	return auth.TrustLocal(appMux(opts))
+}
+
+func appMux(opts Options) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
+	if opts.API != nil {
+		opts.API.Register(mux)
+	}
 	mux.Handle("/", spaHandler(opts.Assets))
 	return mux
 }

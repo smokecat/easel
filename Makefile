@@ -8,7 +8,7 @@ LDFLAGS := -s -w -X $(PKG).version=$(VERSION) -X $(PKG).commit=$(COMMIT)
 
 export CGO_ENABLED ?= 0
 
-.PHONY: build web go deps dev test test-go test-web lint fmt clean
+.PHONY: build web go deps dev test test-go test-web lint generate fmt clean
 
 ## build: 构建前端并编译单二进制到 $(BIN)
 build: web go
@@ -51,6 +51,10 @@ lint: web/node_modules
 	if [ -n "$$out" ]; then echo "gofmt needed:"; echo "$$out"; exit 1; fi
 	go vet ./...
 	cd web && bun run lint && bun run typecheck
+
+## generate: 改了 internal/store 的迁移或 queries.sql 后重新生成 sqlc 代码（sqlc 需要 cgo）
+generate:
+	go generate ./internal/store
 
 ## fmt: 格式化 Go 代码
 fmt:
