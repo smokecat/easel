@@ -26,11 +26,12 @@ func ParseHosts(app, content string) (Hosts, error) {
 	if err != nil {
 		return Hosts{}, err
 	}
-	h := Hosts{App: a, Content: c}
-	if _, ok := h.Label(a.Host); ok || strings.EqualFold(a.Host, c.Host) {
-		return Hosts{}, fmt.Errorf("app URL %s must not be the content host or one of its subdomains", app)
+	// 后台可以就是内容域本身（easel.example.com + *.easel.example.com），但不能是它的子域，
+	// 否则后台和某个原型标签抢同一个主机名
+	if strings.HasSuffix(a.Host, "."+c.Host) {
+		return Hosts{}, fmt.Errorf("app URL %s must not be a subdomain of the content URL %s", app, content)
 	}
-	return h, nil
+	return Hosts{App: a, Content: c}, nil
 }
 
 func parseOrigin(what, raw string) (*url.URL, error) {
@@ -65,8 +66,17 @@ func (h Hosts) Label(host string) (label string, ok bool) {
 	return label, true
 }
 
-// IsContentDomain 判断 host 是否落在内容域里（包括内容域本身和多级子域），这些请求都不能交给后台。
+// IsContentDomain 判断 host 是否落在内容域里（内容域本身和多级子域），这些请求都不能交给后台。
+// 后台主机就是内容域本身时，它不算内容域。
 func (h Hosts) IsContentDomain(host string) bool {
 	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if host == h.App.Host {
+		return false
+	}
 	return host == h.Content.Host || strings.HasSuffix(host, "."+h.Content.Host)
+}
+
+// IsApp 判断 host 是否是后台主机。
+func (h Hosts) IsApp(host string) bool {
+	return strings.ToLower(strings.TrimSuffix(host, ".")) == h.App.Host
 }

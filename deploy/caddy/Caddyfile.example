@@ -1,0 +1,23 @@
+# easel 的 Caddy 配置示例：后台 easel.example.com，原型 *.easel.example.com，证书按需签发。
+#
+# DNS：easel.example.com 和 *.easel.example.com 都指向这台机器。
+# easel 启动参数：easel serve --app-url https://easel.example.com --content-url https://easel.example.com
+#
+# 按需签发的代价：每个原型（以及 <label>--v<N> 版本地址）各签一张证书，主机名会进公开的证书透明日志，
+# 并受 Let's Encrypt「每注册域每 7 天 50 张」的限制。不想要这些代价就改用泛域名证书（需要 DNS 插件）。
+{
+	on_demand_tls {
+		# easel 只放行后台主机和已存在的原型主机名
+		ask http://127.0.0.1:7780/_tls/ask
+	}
+}
+
+easel.example.com, *.easel.example.com {
+	tls {
+		on_demand
+	}
+	# ask 端点只给 Caddy 自己用，不对公网开放
+	@ask path /_tls/*
+	respond @ask 404
+	reverse_proxy 127.0.0.1:7780
+}

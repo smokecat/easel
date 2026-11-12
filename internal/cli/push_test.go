@@ -30,11 +30,16 @@ type testServer struct {
 
 func newTestServer(t *testing.T) *testServer {
 	t.Helper()
+	return newTestServerWith(t, "http://127.0.0.1:7780", "http://localhost:7780")
+}
+
+func newTestServerWith(t *testing.T, appURL, contentURL string) *testServer {
+	t.Helper()
 	t.Setenv("EASEL_NAME", "")
 	t.Setenv("EASEL_SOCKET", "")
 	dir := t.TempDir()
 	inst, err := openInstance(context.Background(), serveConfig{
-		DataDir: filepath.Join(dir, "data"), AppURL: "http://127.0.0.1:7780", ContentURL: "http://localhost:7780",
+		DataDir: filepath.Join(dir, "data"), AppURL: appURL, ContentURL: contentURL,
 		Assets: fstest.MapFS{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

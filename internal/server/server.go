@@ -59,8 +59,41 @@ func appMux(opts Options) *http.ServeMux {
 	if opts.API != nil {
 		opts.API.Register(mux)
 	}
+	if opts.Content != nil {
+		mux.Handle("GET "+TLSAskPath, tlsAsk(opts))
+	}
 	mux.Handle("/", spaHandler(opts.Assets))
 	return mux
+}
+
+// TLSAskPath 是给 Caddy on-demand TLS 的 ask 端点：GET /_tls/ask?domain=<主机名>，200 表示可以签发。
+const TLSAskPath = "/_tls/ask"
+
+// tlsAsk 只放行后台主机和已存在的原型 / 版本标签，避免任意子域都去签证书（会被 CA 拦截、挤占额度）。
+// Caddy 自己发起的 ask 请求不带 X-Forwarded-For；经反向代理进来的公网请求都带，一律 404，
+// 免得把它当成枚举原型的接口。Caddyfile 里也应屏蔽这个路径。
+func tlsAsk(opts Options) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if r.Header.Get("X-Forwarded-For") != "" {
+			http.NotFound(w, r)
+			return
+		}
+		domain := r.URL.Query().Get("domain")
+		ok := opts.Hosts.IsApp(domain)
+		if label, isLabel := opts.Hosts.Label(domain); !ok && isLabel {
+			var err error
+			if ok, err = opts.Content.Exists(r.Context(), label); err != nil {
+				http.Error(w, "lookup failed", http.StatusInternalServerError)
+				return
+			}
+		}
+		if !ok {
+			http.Error(w, "unknown domain", http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 }
 
 // spaHandler 提供管理面板：存在的文件直接返回，其余路径回退到 index.html，交给前端路由。

@@ -31,6 +31,10 @@ journalctl --user -u easel -f                  # 看日志
 
 升级：`make install && systemctl --user restart easel`。要改监听地址或公开地址时用 `systemctl --user edit easel` 写 drop-in 覆盖 `ExecStart`。
 
+### 接到公网
+
+后台和原型内容必须在不同主机上：后台用 `easel.example.com`，原型用 `*.easel.example.com`（两条 DNS 记录），启动参数 `--app-url https://easel.example.com --content-url https://easel.example.com`。Caddy 配置见 [`deploy/caddy/Caddyfile.example`](deploy/caddy/Caddyfile.example)：证书按需签发，easel 的 `/_tls/ask` 只放行后台主机和已存在的原型。
+
 ## 推送
 
 ```sh

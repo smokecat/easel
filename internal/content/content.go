@@ -155,6 +155,15 @@ func (h *Handler) notFound(w http.ResponseWriter, r *http.Request, m *manifest, 
 	h.plainError(w, http.StatusNotFound)
 }
 
+// Exists 报告内容主机标签是否对应一个可提供的版本（用于 TLS 证书按需签发的放行判断）。
+func (h *Handler) Exists(ctx context.Context, label string) (bool, error) {
+	_, _, err := h.lookup(ctx, label)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 // lookup 按标签找到要提供的版本。<label>--v<N> 固定到第 N 版（pinned）。
 func (h *Handler) lookup(ctx context.Context, label string) (m *manifest, pinned bool, err error) {
 	base, num, pinned := strings.Cut(label, "--v")
