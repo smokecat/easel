@@ -42,6 +42,57 @@ type VersionInfo struct {
 	Bytes     int64  `json:"bytes"`
 	CreatedAt string `json:"created_at"`
 	URL       string `json:"url"` // 固定到这个版本
+	// 以下两项只在版本列表里有值
+	Origin  string `json:"origin,omitempty"` // upload | rollback | build
+	Current bool   `json:"current,omitempty"`
+}
+
+// VersionList 是 GET /api/v1/prototypes/{name}/versions 的响应，最新的在前。
+type VersionList struct {
+	Versions []VersionInfo `json:"versions"`
+}
+
+// RollbackRequest 是 POST /api/v1/prototypes/{name}/rollback 的请求体。
+type RollbackRequest struct {
+	Version int64 `json:"version"`
+}
+
+func (a *API) listVersions(w http.ResponseWriter, r *http.Request) {
+	vs, err := a.Publish.Versions(r.Context(), r.PathValue("name"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	resp := VersionList{Versions: make([]VersionInfo, len(vs))}
+	for i, v := range vs {
+		resp.Versions[i] = versionInfo(v.VersionSummary)
+		resp.Versions[i].Origin, resp.Versions[i].Current = v.Origin, v.Current
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (a *API) rollback(w http.ResponseWriter, r *http.Request) {
+	var req RollbackRequest
+	if !a.decode(w, r, &req) {
+		return
+	}
+	if req.Version < 1 {
+		a.fail(w, r, badRequest("version must be a positive version number"))
+		return
+	}
+	res, err := a.Publish.Rollback(r.Context(), r.PathValue("name"), req.Version)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}
+
+func versionInfo(c publish.VersionSummary) VersionInfo {
+	return VersionInfo{
+		Number: c.Number, Kind: c.Kind, Note: c.Note, Files: c.Files, Bytes: c.Bytes,
+		CreatedAt: rfc3339(c.CreatedAt), URL: c.URL,
+	}
 }
 
 // PrototypeList 是 GET /api/v1/prototypes 的响应。
@@ -115,10 +166,8 @@ func prototypeInfo(p publish.Prototype) PrototypeInfo {
 		}
 	}
 	if c := p.Current; c != nil {
-		info.Current = &VersionInfo{
-			Number: c.Number, Kind: c.Kind, Note: c.Note, Files: c.Files, Bytes: c.Bytes,
-			CreatedAt: rfc3339(c.CreatedAt), URL: c.URL,
-		}
+		v := versionInfo(*c)
+		info.Current = &v
 	}
 	return info
 }

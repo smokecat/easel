@@ -52,6 +52,14 @@ SELECT * FROM revision WHERE id = ?;
 -- name: GetRevisionByNumber :one
 SELECT * FROM revision WHERE prototype_id = ? AND number = ?;
 
+-- name: ListRevisions :many
+SELECT * FROM revision WHERE prototype_id = ? ORDER BY number DESC;
+
+-- name: CopyArtifacts :exec
+INSERT INTO artifact (revision_id, path, blob_hash, size, content_type)
+SELECT CAST(sqlc.arg(to_revision) AS INTEGER), a.path, a.blob_hash, a.size, a.content_type
+FROM artifact AS a WHERE a.revision_id = sqlc.arg(from_revision);
+
 -- name: NextRevisionNumber :one
 SELECT CAST(COALESCE(MAX(number), 0) + 1 AS INTEGER) AS next FROM revision WHERE prototype_id = ?;
 

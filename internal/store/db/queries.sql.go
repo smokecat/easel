@@ -41,6 +41,22 @@ func (q *Queries) ClearCurrentRevision(ctx context.Context, id int64) error {
 	return err
 }
 
+const copyArtifacts = `-- name: CopyArtifacts :exec
+INSERT INTO artifact (revision_id, path, blob_hash, size, content_type)
+SELECT CAST(?1 AS INTEGER), a.path, a.blob_hash, a.size, a.content_type
+FROM artifact AS a WHERE a.revision_id = ?2
+`
+
+type CopyArtifactsParams struct {
+	ToRevision   int64
+	FromRevision int64
+}
+
+func (q *Queries) CopyArtifacts(ctx context.Context, arg CopyArtifactsParams) error {
+	_, err := q.db.ExecContext(ctx, copyArtifacts, arg.ToRevision, arg.FromRevision)
+	return err
+}
+
 const countRevisions = `-- name: CountRevisions :one
 SELECT COUNT(*) FROM revision WHERE prototype_id = ?
 `
@@ -909,6 +925,46 @@ func (q *Queries) ListPrototypes(ctx context.Context) ([]ListPrototypesRow, erro
 			&i.UpHostMode,
 			&i.UpLastSeenAt,
 			&i.UpPausedReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRevisions = `-- name: ListRevisions :many
+SELECT id, prototype_id, number, origin, kind, entry, spa, note, manifest_hash, file_count, total_bytes, created_at FROM revision WHERE prototype_id = ? ORDER BY number DESC
+`
+
+func (q *Queries) ListRevisions(ctx context.Context, prototypeID int64) ([]Revision, error) {
+	rows, err := q.db.QueryContext(ctx, listRevisions, prototypeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Revision{}
+	for rows.Next() {
+		var i Revision
+		if err := rows.Scan(
+			&i.ID,
+			&i.PrototypeID,
+			&i.Number,
+			&i.Origin,
+			&i.Kind,
+			&i.Entry,
+			&i.Spa,
+			&i.Note,
+			&i.ManifestHash,
+			&i.FileCount,
+			&i.TotalBytes,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

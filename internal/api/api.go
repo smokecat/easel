@@ -37,6 +37,8 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/prototypes/{name}", a.need(auth.ScopeRead, a.getPrototype))
 	mux.Handle("DELETE /api/v1/prototypes/{name}", a.need(auth.ScopeWrite, a.deletePrototype))
 	mux.Handle("PUT /api/v1/prototypes/{name}/upstream", a.need(auth.ScopeProxy, a.expose))
+	mux.Handle("GET /api/v1/prototypes/{name}/versions", a.need(auth.ScopeRead, a.listVersions))
+	mux.Handle("POST /api/v1/prototypes/{name}/rollback", a.need(auth.ScopeWrite, a.rollback))
 
 	mux.Handle("GET /api/v1/whoami", a.guard(authenticated, a.whoami))
 	mux.Handle("PUT /api/v1/admin/password", a.guard(auth.CheckLocal, a.setPassword))
