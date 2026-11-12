@@ -10,6 +10,17 @@ import (
 	"database/sql"
 )
 
+const blobInPendingUpload = `-- name: BlobInPendingUpload :one
+SELECT EXISTS (SELECT 1 FROM upload WHERE instr(request, ?1) > 0) AS pending
+`
+
+func (q *Queries) BlobInPendingUpload(ctx context.Context, hash string) (bool, error) {
+	row := q.db.QueryRowContext(ctx, blobInPendingUpload, hash)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
 const blobReferenced = `-- name: BlobReferenced :one
 SELECT EXISTS (SELECT 1 FROM artifact WHERE blob_hash = ?) AS referenced
 `
@@ -19,6 +30,26 @@ func (q *Queries) BlobReferenced(ctx context.Context, blobHash string) (bool, er
 	var referenced bool
 	err := row.Scan(&referenced)
 	return referenced, err
+}
+
+const clearCurrentRevision = `-- name: ClearCurrentRevision :exec
+UPDATE prototype SET current_revision_id = NULL WHERE id = ?
+`
+
+func (q *Queries) ClearCurrentRevision(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, clearCurrentRevision, id)
+	return err
+}
+
+const countRevisions = `-- name: CountRevisions :one
+SELECT COUNT(*) FROM revision WHERE prototype_id = ?
+`
+
+func (q *Queries) CountRevisions(ctx context.Context, prototypeID int64) (int64, error) {
+	row := q.db.QueryRowContext(ctx, countRevisions, prototypeID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createAPIToken = `-- name: CreateAPIToken :one
@@ -348,6 +379,18 @@ DELETE FROM view_session WHERE expires_at <= ?
 func (q *Queries) DeleteExpiredViewSessions(ctx context.Context, expiresAt int64) error {
 	_, err := q.db.ExecContext(ctx, deleteExpiredViewSessions, expiresAt)
 	return err
+}
+
+const deletePrototype = `-- name: DeletePrototype :execrows
+DELETE FROM prototype WHERE id = ?
+`
+
+func (q *Queries) DeletePrototype(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePrototype, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const deleteSession = `-- name: DeleteSession :exec
@@ -699,6 +742,66 @@ func (q *Queries) ListArtifacts(ctx context.Context, revisionID int64) ([]Artifa
 			&i.BlobHash,
 			&i.Size,
 			&i.ContentType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPrototypes = `-- name: ListPrototypes :many
+SELECT prototype.id, prototype.name, prototype.label, prototype.title, prototype.serve_kind, prototype.source_fingerprint, prototype.current_revision_id, prototype.created_at, prototype.updated_at,
+       revision.number AS rev_number, revision.kind AS rev_kind, revision.note AS rev_note,
+       revision.file_count AS rev_files, revision.total_bytes AS rev_bytes, revision.created_at AS rev_created_at,
+       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count
+FROM prototype LEFT JOIN revision ON revision.id = prototype.current_revision_id
+ORDER BY prototype.updated_at DESC, prototype.id DESC
+`
+
+type ListPrototypesRow struct {
+	Prototype    Prototype
+	RevNumber    sql.NullInt64
+	RevKind      sql.NullString
+	RevNote      sql.NullString
+	RevFiles     sql.NullInt64
+	RevBytes     sql.NullInt64
+	RevCreatedAt sql.NullInt64
+	VersionCount int64
+}
+
+func (q *Queries) ListPrototypes(ctx context.Context) ([]ListPrototypesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPrototypes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPrototypesRow{}
+	for rows.Next() {
+		var i ListPrototypesRow
+		if err := rows.Scan(
+			&i.Prototype.ID,
+			&i.Prototype.Name,
+			&i.Prototype.Label,
+			&i.Prototype.Title,
+			&i.Prototype.ServeKind,
+			&i.Prototype.SourceFingerprint,
+			&i.Prototype.CurrentRevisionID,
+			&i.Prototype.CreatedAt,
+			&i.Prototype.UpdatedAt,
+			&i.RevNumber,
+			&i.RevKind,
+			&i.RevNote,
+			&i.RevFiles,
+			&i.RevBytes,
+			&i.RevCreatedAt,
+			&i.VersionCount,
 		); err != nil {
 			return nil, err
 		}

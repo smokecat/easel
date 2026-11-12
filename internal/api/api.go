@@ -33,6 +33,10 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/uploads/{id}/commit", a.need(auth.ScopeWrite, a.commit))
 	mux.Handle("POST /api/v1/push", a.need(auth.ScopeWrite, a.pushArchive))
 
+	mux.Handle("GET /api/v1/prototypes", a.need(auth.ScopeRead, a.listPrototypes))
+	mux.Handle("GET /api/v1/prototypes/{name}", a.need(auth.ScopeRead, a.getPrototype))
+	mux.Handle("DELETE /api/v1/prototypes/{name}", a.need(auth.ScopeWrite, a.deletePrototype))
+
 	mux.Handle("GET /api/v1/whoami", a.guard(authenticated, a.whoami))
 	mux.Handle("PUT /api/v1/admin/password", a.guard(auth.CheckLocal, a.setPassword))
 	mux.Handle("POST /api/v1/tokens", a.guard(auth.CheckAdmin, a.createToken))

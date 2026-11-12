@@ -43,6 +43,8 @@ type command struct {
 func commands() []command {
 	return []command{
 		{"push", "推送目录或文件，返回预览链接", runPush},
+		{"list", "列出原型", runList},
+		{"rm", "删除原型（所有版本和分享链接）", runRm},
 		{"share", "创建、列出、撤销分享链接", runShare},
 		{"login", "登录远端服务端（保存地址和 API token）", runLogin},
 		{"logout", "删除保存的凭据", runLogout},

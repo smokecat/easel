@@ -46,6 +46,11 @@ easel share create <原型名> --expires 7d --json    # 限定有效期
 - `easel share list <原型名> --json` 能再次拿到已有的链接；`easel share revoke <id>` 撤销。
 - 用 token 连远端时，token 需要 `share` 权限；退出码 3 且提示 share scope 时告诉用户。
 
+## 查看与删除
+
+- `easel list --json`：列出原型（`prototypes[].name`、`preview_url`、`current.number`）。推之前不确定名字时先看一下。
+- `easel rm <原型名> --yes --json`：删除原型的所有版本和分享链接，不可恢复。**只在用户明确要求删除某个原型时执行**，不要为了「重来」或清理自己推错的东西擅自删除；推错了先告诉用户。
+
 ## 原型名
 
 缺省按 git 仓库名（加相对路径）推断。退出码 5（`name_conflict`）表示推断出的名字已被别的来源占用：换一个 `--name <slug>`，或在确认是同一个原型后用 `--name` 指定它。名字只能用小写字母、数字和单个短横线。

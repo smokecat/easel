@@ -85,6 +85,7 @@ easel push ./dist --json      # 结构化结果，字段只增不改
 - 再推一次得到新版本，只上传变化的文件；内容完全一样时不产生新版本。
 - 默认排除点文件（`.well-known/` 除外）、`node_modules/` 和常见密钥文件；不读 `.gitignore`。`.easelignore`、`--exclude` 追加规则，`--include` 加回来，`--dry-run` 只列出会上传什么。
 - 每个原型在内容域的一级子域上提供，`<label>--v<N>` 固定到某个版本。默认内容域是 `localhost:<端口>`（浏览器会把 `*.localhost` 解析到本机）；部署时用 `--app-url`、`--content-url` 设置公开地址。
+- `easel list` 列出原型；`easel rm <name>` 删除原型的所有版本和分享链接，预览地址立即失效（终端里要再输一遍原型名确认，脚本里加 `--yes`）。不再被引用的文件由服务端每小时回收一次。
 - 也可以不用 CLI，直接把 tar / tar.gz / zip 发到整包端点：`tar -C dist -cf - . | curl --unix-socket <socket> --data-binary @- 'http://easel/api/v1/push?name=myapp'`
 
 `easel.toml`（可选，放在项目根）：

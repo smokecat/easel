@@ -37,6 +37,7 @@ type serveConfig struct {
 type instance struct {
 	store  *store.Store
 	auth   *auth.Service
+	pub    *publish.Service
 	tcp    http.Handler
 	socket http.Handler
 	hosts  config.Hosts
@@ -75,16 +76,21 @@ func openInstance(ctx context.Context, c serveConfig) (*instance, error) {
 		API:     &api.API{Publish: pub, Auth: authn, Log: c.Log, TempDir: filepath.Join(c.DataDir, "blobs", "tmp")},
 		Content: &content.Handler{Store: st, Blobs: blobs, Hosts: hosts, Log: c.Log},
 	}
-	return &instance{store: st, auth: authn, tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
+	return &instance{store: st, auth: authn, pub: pub, tcp: server.New(opts), socket: server.NewSocket(opts), hosts: hosts}, nil
 }
 
-// sweepLoop 每小时清理一次过期的会话和票据。
+// sweepLoop 每小时清理一次过期的会话和票据，并回收不再被引用的 blob（删除原型、推送失败留下的）。
 func (i *instance) sweepLoop(ctx context.Context, log *slog.Logger) {
 	t := time.NewTicker(time.Hour)
 	defer t.Stop()
 	for {
 		if err := i.auth.Sweep(ctx); err != nil && ctx.Err() == nil {
 			log.Warn("sweep expired sessions", "err", err)
+		}
+		if n, err := i.pub.SweepBlobs(ctx); err != nil && ctx.Err() == nil {
+			log.Warn("sweep blobs", "err", err)
+		} else if n > 0 {
+			log.Info("removed unreferenced blobs", "count", n)
 		}
 		select {
 		case <-ctx.Done():

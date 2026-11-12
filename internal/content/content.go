@@ -33,11 +33,18 @@ type Handler struct {
 	Hosts config.Hosts
 	Log   *slog.Logger
 
-	mu    sync.Mutex
-	cache map[int64]*manifest // 版本不可变，按版本 ID 缓存永远有效
+	mu sync.Mutex
+	// 版本不可变，缓存永远有效。键里带 manifest 哈希：原型删除后 SQLite 可能复用 revision ID
+	cache map[manifestKey]*manifest
 }
 
 const maxCachedManifests = 128
+
+type manifestKey struct {
+	id   int64
+	hash string
+	at   int64 // 同样的文件也可能带不同的 spa / 入口设置
+}
 
 type manifest struct {
 	rev   db.Revision
@@ -193,7 +200,8 @@ func (h *Handler) lookup(ctx context.Context, label string) (m *manifest, pinned
 
 func (h *Handler) manifest(ctx context.Context, rev db.Revision) (*manifest, error) {
 	h.mu.Lock()
-	m, ok := h.cache[rev.ID]
+	key := manifestKey{rev.ID, rev.ManifestHash, rev.CreatedAt}
+	m, ok := h.cache[key]
 	h.mu.Unlock()
 	if ok {
 		return m, nil
@@ -208,7 +216,7 @@ func (h *Handler) manifest(ctx context.Context, rev db.Revision) (*manifest, err
 	}
 	h.mu.Lock()
 	if h.cache == nil {
-		h.cache = map[int64]*manifest{}
+		h.cache = map[manifestKey]*manifest{}
 	}
 	if len(h.cache) >= maxCachedManifests {
 		for k := range h.cache { // map 遍历顺序随机，相当于随机淘汰
@@ -216,7 +224,7 @@ func (h *Handler) manifest(ctx context.Context, rev db.Revision) (*manifest, err
 			break
 		}
 	}
-	h.cache[rev.ID] = m
+	h.cache[key] = m
 	h.mu.Unlock()
 	return m, nil
 }

@@ -134,3 +134,23 @@ DELETE FROM ticket WHERE expires_at <= ?;
 
 -- name: DeleteExpiredViewSessions :exec
 DELETE FROM view_session WHERE expires_at <= ?;
+
+-- name: ListPrototypes :many
+SELECT sqlc.embed(prototype),
+       revision.number AS rev_number, revision.kind AS rev_kind, revision.note AS rev_note,
+       revision.file_count AS rev_files, revision.total_bytes AS rev_bytes, revision.created_at AS rev_created_at,
+       (SELECT COUNT(*) FROM revision r2 WHERE r2.prototype_id = prototype.id) AS version_count
+FROM prototype LEFT JOIN revision ON revision.id = prototype.current_revision_id
+ORDER BY prototype.updated_at DESC, prototype.id DESC;
+
+-- name: CountRevisions :one
+SELECT COUNT(*) FROM revision WHERE prototype_id = ?;
+
+-- name: ClearCurrentRevision :exec
+UPDATE prototype SET current_revision_id = NULL WHERE id = ?;
+
+-- name: DeletePrototype :execrows
+DELETE FROM prototype WHERE id = ?;
+
+-- name: BlobInPendingUpload :one
+SELECT EXISTS (SELECT 1 FROM upload WHERE instr(request, sqlc.arg(hash)) > 0) AS pending;
