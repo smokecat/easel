@@ -87,7 +87,7 @@ func isAdmin(r *http.Request) bool {
 }
 
 func (s *Service) loginForm(next string) page {
-	return page{Title: "Sign in", Form: true, Action: LoginPath, Submit: "Sign in", Hidden: map[string]string{"next": next},
+	return page{Title: "Sign in", Form: true, Action: LoginPath, Submit: "Sign in", Hidden: map[string]string{"next": next}, Username: "admin",
 		FormRedirects: s.Hosts.Content.Scheme + "://*." + s.Hosts.Content.Host}
 }
 

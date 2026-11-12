@@ -35,7 +35,8 @@ func (s *Service) PushArchive(ctx context.Context, name string, body io.Reader, 
 	if err != nil {
 		return nil, err
 	}
-	in := &ingester{s: s, ig: ig, seen: map[string]bool{}}
+	// skipped 初始化成空切片：结果里的 stats.skipped 约定是数组，不能是 null
+	in := &ingester{s: s, ig: ig, seen: map[string]bool{}, skipped: []string{}}
 
 	br := bufio.NewReader(body)
 	magic, _ := br.Peek(4)

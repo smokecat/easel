@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +25,20 @@ func (s *testServer) apiCall(method, path, body string) (*httptest.ResponseRecor
 	var m map[string]any
 	_ = json.Unmarshal(rec.Body.Bytes(), &m)
 	return rec, m
+}
+
+// 面板的拖拽上传走整包端点：没有被排除的文件时 stats.skipped 必须是 []，不能是 null（前端读 .length）。
+func TestArchivePushSkippedIsArray(t *testing.T) {
+	s := newTestServer(t)
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	_ = tw.WriteHeader(&tar.Header{Name: "index.html", Mode: 0o644, Size: 2, Typeflag: tar.TypeReg})
+	_, _ = tw.Write([]byte("hi"))
+	_ = tw.Close()
+	rec, _ := s.apiCall("POST", "/api/v1/push?name=panel", buf.String())
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"skipped":[]`) {
+		t.Errorf("archive push = %d %s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestVersionsAndRollback(t *testing.T) {

@@ -37,6 +37,7 @@ code { font-size: .9em; }
 {{if .Form}}
 <form method="post" action="{{.Action}}">
 {{range $k, $v := .Hidden}}<input type="hidden" name="{{$k}}" value="{{$v}}">{{end}}
+{{if .Username}}<input type="text" name="username" value="{{.Username}}" autocomplete="username" hidden>{{end}}
 <input type="password" name="password" autocomplete="current-password" placeholder="Password" required autofocus aria-label="Password">
 <button type="submit">{{.Submit}}</button>
 </form>
@@ -51,6 +52,8 @@ type page struct {
 	Form                  bool
 	Action, Submit        string
 	Hidden                map[string]string
+	// Username 非空时加一个隐藏的用户名字段，让密码管理器能把密码和这个站点对上（单管理员，固定值）
+	Username string
 	// FormRedirects 是表单提交后重定向链可能到达的其他源，追加到 CSP 的 form-action。
 	// Chrome 对 form-action 连重定向的每一跳都检查：登录成功后会经 /auth/authorize 跳到内容主机换票。
 	FormRedirects string
