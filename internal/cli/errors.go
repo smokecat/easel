@@ -18,12 +18,20 @@ type failure struct {
 	Retryable bool   `json:"retryable"`
 }
 
+// conflictError 是本地目标已被别的东西占用（对应退出码 ExitConflict）。
+type conflictError struct{ msg, hint string }
+
+func (e *conflictError) Error() string { return e.msg }
+
 func classify(err error) failure {
 	var ue *usageError
 	var ce *client.ConnError
 	var ae *client.APIError
 	var auErr *authError
+	var cfErr *conflictError
 	switch {
+	case errors.As(err, &cfErr):
+		return failure{exit: ExitConflict, Code: "conflict", Message: cfErr.msg, Hint: cfErr.hint}
 	case errors.As(err, &ue):
 		return failure{exit: ExitUsage, Code: "usage", Message: ue.msg, Hint: ue.hint}
 	case errors.As(err, &auErr):

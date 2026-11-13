@@ -51,6 +51,7 @@ func commands() []command {
 		{"logout", "删除保存的凭据", runLogout},
 		{"token", "管理 API token", runToken},
 		{"admin", "管理员设置（passwd）", runAdmin},
+		{"skill", "打印或安装给 AI agent 用的 Skill", runSkill},
 		{"serve", "启动 easel 服务端", runServe},
 		{"version", "显示版本信息", runVersion},
 	}

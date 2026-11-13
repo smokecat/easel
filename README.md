@@ -97,6 +97,19 @@ spa = true         # 未命中的页面路径回退到入口页
 ignore = ["*.map"]
 ```
 
+## 给 AI agent 用
+
+easel 自带一份 Agent Skill（`skills/easel/SKILL.md`，嵌在二进制里），教 agent 推送、读结果、处理退出码、生成分享链接：
+
+```sh
+easel skill install   # 写到 ~/.agents/skills/easel/（Codex、Gemini CLI），有 ~/.claude 时再软链 ~/.claude/skills/easel（Claude Code）
+easel skill           # 打印 SKILL.md，可以贴进别的工具或项目的 AGENTS.md
+```
+
+- 升级 easel 后再运行一次 `easel skill install` 更新；内容没变时什么都不改。
+- `--dir <目录>` 装到别处（比如项目的 `.agents/skills`，此时不建 Claude 软链）；`--no-claude` 不建软链。
+- 目标已被别的软链或文件占用时（比如开发者软链到了源码仓库）不覆盖，退出码 5；确认后加 `--force` 替换。用户自己的目录 `--force` 也不删。
+
 ## 管理面板
 
 登录后台（`--app-url` 的地址）即可：
